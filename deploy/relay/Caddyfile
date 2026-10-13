@@ -1,3 +1,29 @@
+{
+	admin off
+	persist_config off
+	log default {
+		output stderr
+		format filter {
+			wrap json
+			fields {
+				request>headers>X-Relay-Token delete
+				request>headers>X-Apisports-Key delete
+			}
+		}
+	}
+}
+
 {$RELAY_DOMAIN} {
-    reverse_proxy relay:8787
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>headers>X-Relay-Token delete
+				request>headers>X-Apisports-Key delete
+			}
+		}
+	}
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy relay:8787
 }

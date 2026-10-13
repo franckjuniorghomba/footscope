@@ -28,7 +28,14 @@ services:
         max-size: 10m
         max-file: '3'
   https:
-    image: caddy:2-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: '0'
+    read_only: true
     environment:
       RELAY_DOMAIN: ${RELAY_DOMAIN:?Configure RELAY_DOMAIN}
     ports:
