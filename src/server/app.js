@@ -79,13 +79,40 @@ export default {
           retrievedAt: new Date().toISOString(),
           errors: {},
         };
+        let limited = null;
         for (const [k, p] of Object.entries(tasks)) {
+          if (limited) {
+            out[k] = [];
+            out.errors[k] = limited.message;
+            continue;
+          }
           try {
             out[k] = (await api(env, p)).response;
           } catch (e) {
+            if (e.code === 'API_RATE_LIMIT' || e.code === 'API_QUEUE_BUSY') limited = e;
             out[k] = [];
             out.errors[k] = e.message;
           }
+        }
+        // Une fiche incomplète à cause d'une pause du fournisseur ne doit pas ressembler à
+        // « aucune donnée ». Les parties déjà obtenues restent en cache : le nouvel essai est court.
+        if (limited) {
+          const retryAfter = limited.retryAfter || 65;
+          const response = json(
+            {
+              error:
+                'Fiche incomplète : ' +
+                limited.message +
+                ' Les données déjà obtenues sont conservées.',
+              code: limited.code,
+              retryable: true,
+              retryAfter,
+              missing: Object.keys(out.errors),
+            },
+            429,
+          );
+          response.headers.set('Retry-After', String(retryAfter));
+          return response;
         }
         return json(out);
       }

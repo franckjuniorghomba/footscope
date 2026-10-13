@@ -27,6 +27,8 @@ const c = vm.createContext({
   Map,
   JSON,
   setTimeout() {},
+  setInterval() {},
+  clearInterval() {},
   localStorage: { getItem: () => null },
   fetch: async () => ({
     ok: true,
