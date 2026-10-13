@@ -1,0 +1,9 @@
+.env
+.env.*
+!.env.example
+dist/
+node_modules/
+.build/
+*.zip
+*.tar.gz
+coverage/

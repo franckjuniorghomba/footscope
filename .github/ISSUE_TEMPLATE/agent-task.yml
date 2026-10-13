@@ -1,0 +1,24 @@
+name: Tâche pour un agent
+description: Une correction ou optimisation mesurable, avec un périmètre défini
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problème observable
+      description: Décrire un cas reproductible et son impact.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Périmètre
+      description: Modules concernés et changements exclus.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Critères d’acceptation
+      description: Tests ou mesures vérifiables ; conserver les invariants de AGENTS.md.
+    validations:
+      required: true

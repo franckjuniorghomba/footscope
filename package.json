@@ -1,0 +1,22 @@
+{
+  "name": "footscope",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "npm run build && node scripts/run-tests.mjs",
+    "validate": "node scripts/validate-artifact.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run format:check && npm test && npm run validate"
+  },
+  "description": "Football market analysis, transparent filters and simulation coupons",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "npm@11.9.0",
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "prettier": "3.9.10"
+  }
+}

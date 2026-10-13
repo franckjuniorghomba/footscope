@@ -1,0 +1,1 @@
+Read AGENTS.md, README.md and docs/ARCHITECTURE.md before editing. Follow module boundaries. Run npm run check. Open a focused PR with evidence of improvement. Preserve all prediction and coupon safeguards. Autonomous tasks do not merge or deploy. Never use real API credentials in ordinary tests. Tests with fixtures do not validate real-world profitability.
