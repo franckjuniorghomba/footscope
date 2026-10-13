@@ -54,7 +54,7 @@ Les secrets sont configurés dans l’hébergement, jamais dans le dépôt ou l�
 
 ## Limites connues
 
-- API-Football limite parfois les appels des IP de sortie partagées. Le cache, la pause et la file partagée atténuent ce problème ; une collecte à IP dédiée reste à évaluer et à déployer.
+- API-Football limite parfois les appels des IP de sortie partagées. Le cache, la pause et la file partagée atténuent ce problème. Un relais à IP fixe peut réduire les limitations liées aux IP partagées, sans supprimer les limites du fournisseur. Voir [la configuration du relais](docs/RELAY.md). Aucun serveur relais n’est déployé par ce correctif.
 - Toutes les rencontres du périmètre choisi sont examinées. Une première étape écarte celles sans cotes exploitables ; ce n’est pas une limite arbitraire à douze rencontres.
 - Quatre sélections maximum, une par match, chez un même bookmaker. Aucun coupon obligatoire.
 - Le Poisson indépendant ne corrige pas encore la force des adversaires ni les effets des absences. La sensibilité prudente n’est pas un intervalle de confiance calibré.

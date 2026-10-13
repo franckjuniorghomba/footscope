@@ -23,7 +23,8 @@ let fixtures = [],
   loading = false,
   generation = 0,
   matchPage = 1,
-  llmConfigured = false;
+  llmConfigured = false,
+  activeView = 'today';
 const MATCH_PAGE_SIZE = 12;
 try {
   history = JSON.parse(localStorage.getItem('footscope-history') || '[]');
@@ -59,8 +60,54 @@ async function get(path) {
         : 'Réponse serveur inattendue (HTTP ' + r.status + '). Réessayez.',
     );
   }
-  if (!r.ok) throw Error(d.error || 'Erreur de connexion');
+  if (!r.ok) {
+    const e = Error(d.error || 'Erreur de connexion');
+    e.code = d.code || null;
+    e.retryable = r.status === 429 && d.retryable === true;
+    e.retryAfter = Number(d.retryAfter) || 65;
+    throw e;
+  }
   return d;
+}
+// Nouvel essai automatique après une pause du fournisseur, avec compte à rebours visible.
+// Annulé si l'utilisateur change de date, de filtre ou de vue entre-temps.
+let retryTimer = null,
+  retryState = null;
+const MAX_AUTO_RETRIES = 2;
+function cancelRetry() {
+  clearInterval(retryTimer);
+  retryTimer = null;
+  if (retryState) retryState.target.textContent = retryState.label;
+  retryState = null;
+}
+function advanceGeneration() {
+  cancelRetry();
+  generation++;
+  loading = false;
+  $('#refresh').disabled = false;
+  return generation;
+}
+function scheduleRetry(seconds, gen, target, label, attempt, action) {
+  cancelRetry();
+  if (attempt >= MAX_AUTO_RETRIES) {
+    target.textContent = label + ' Reprises automatiques arrêtées. Actualisez pour réessayer.';
+    return;
+  }
+  const delay = Number(seconds);
+  const until = Date.now() + (Number.isFinite(delay) && delay > 0 ? Math.ceil(delay) : 65) * 1000;
+  retryState = { target, label };
+  const tick = () => {
+    if (gen !== generation || activeView !== 'today') return cancelRetry();
+    const left = Math.ceil((until - Date.now()) / 1000);
+    if (left <= 0) {
+      cancelRetry();
+      action(attempt + 1);
+      return;
+    }
+    target.textContent = label + ' Nouvel essai automatique dans ' + left + ' s.';
+  };
+  retryTimer = setInterval(tick, 1000);
+  tick();
 }
 async function init() {
   try {
@@ -73,8 +120,9 @@ async function init() {
   }
   await load();
 }
-async function load() {
-  const gen = ++generation;
+async function load(attempt = 0) {
+  const gen = advanceGeneration();
+  current = null;
   loading = true;
   $('#refresh').disabled = true;
   $('#matches').innerHTML = '<div class="loader">Lecture du programme et des cotes…</div>';
@@ -103,6 +151,16 @@ async function load() {
       totalPages = results[1].value.paging.total;
     } else notices.push('Cotes indisponibles : ' + results[1].reason.message);
     $('#status').textContent = notices.join(' · ');
+    const paused = results.find((x) => x.status === 'rejected' && x.reason.retryable);
+    if (paused)
+      scheduleRetry(
+        paused.reason.retryAfter,
+        gen,
+        $('#status'),
+        notices.join(' · '),
+        attempt,
+        load,
+      );
     const countries = [...new Set(fixtures.map((f) => f.league.country).filter(Boolean))].sort();
     const selected = $('#country').value;
     $('#country').innerHTML =
@@ -113,8 +171,10 @@ async function load() {
     matchPage = 1;
     render();
   } finally {
-    loading = false;
-    $('#refresh').disabled = false;
+    if (gen === generation) {
+      loading = false;
+      $('#refresh').disabled = false;
+    }
   }
 }
 function ingest(d) {
@@ -212,15 +272,15 @@ function updateLeagues() {
   if (leagues.includes(selected)) $('#league').value = selected;
 }
 function filterChanged() {
-  generation++;
+  advanceGeneration();
   matchPage = 1;
   $('#details').classList.add('hidden');
   $('#program').classList.remove('hidden');
   $('#assistantResult').classList.add('hidden');
   render();
 }
-$('#refresh').onclick = load;
-$('#date').onchange = load;
+$('#refresh').onclick = () => load();
+$('#date').onchange = () => load();
 $('#search').oninput = filterChanged;
 $('#country').onchange = () => {
   updateLeagues();
@@ -307,12 +367,13 @@ $('#matches').onclick = (e) => {
   const b = e.target.closest('[data-match]');
   if (b) detail(b.dataset.match);
 };
-async function detail(id) {
+async function detail(id, attempt = 0) {
+  const gen = advanceGeneration();
+  current = null;
   $('#program').classList.add('hidden');
   $('#details').classList.remove('hidden');
   $('#details').innerHTML =
     '<div class="loader">Lecture de la forme, des absences et des marchés…</div>';
-  const gen = generation;
   try {
     const d = await get('/api/match?id=' + id);
     if (gen !== generation) return;
@@ -385,6 +446,8 @@ async function detail(id) {
         .join('') +
       '</div><div class="panel"><h3>Les marchés & leur prix</h3><p class="note">Seuil = 1 ÷ cote. Ce tableau ne calcule pas de valeur attendue pour les marchés non modélisés. L’ajout au coupon est une simulation choisie manuellement. Les règles de règlement du bookmaker restent à vérifier.</p><select id="book" aria-label="Bookmaker"></select><div id="marketTable" class="scroll"></div></div>';
     $('#back').onclick = () => {
+      advanceGeneration();
+      current = null;
       $('#details').classList.add('hidden');
       $('#program').classList.remove('hidden');
     };
@@ -395,12 +458,21 @@ async function detail(id) {
     $('#book').onchange = () => renderMarkets();
     renderMarkets();
   } catch (e) {
+    if (gen !== generation) return;
     $('#details').innerHTML =
-      '<button class="btn light" id="back">← Le programme</button><p>' + esc(e.message) + '</p>';
+      '<button class="btn light" id="back">← Le programme</button><p id="detailError">' +
+      esc(e.message) +
+      '</p>';
     $('#back').onclick = () => {
+      advanceGeneration();
+      current = null;
       $('#details').classList.add('hidden');
       $('#program').classList.remove('hidden');
     };
+    if (e.retryable)
+      scheduleRetry(e.retryAfter, gen, $('#detailError'), e.message, attempt, (next) =>
+        detail(id, next),
+      );
   }
 }
 function renderMarkets() {
@@ -613,6 +685,8 @@ $('#calcP').oninput = calc;
 document.querySelectorAll('nav button').forEach(
   (b) =>
     (b.onclick = () => {
+      advanceGeneration();
+      activeView = b.dataset.view;
       document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('active', x === b));
       ['today', 'journal', 'method'].forEach((id) =>
         $('#' + id).classList.toggle('hidden', id !== b.dataset.view),
@@ -921,5 +995,12 @@ loadPerformance();
 loadLatest();
 if (typeof setInterval === 'function')
   setInterval(() => {
-    if (!assistantBusy && !loading && !current && document.visibilityState === 'visible') load();
+    if (
+      activeView === 'today' &&
+      !assistantBusy &&
+      !loading &&
+      !current &&
+      document.visibilityState === 'visible'
+    )
+      load();
   }, 15 * 60000);

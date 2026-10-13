@@ -40,6 +40,8 @@ vm.runInNewContext(script, {
   String,
   localStorage: { getItem: () => null },
   setTimeout() {},
+  setInterval() {},
+  clearInterval() {},
   fetch: async (path) => {
     calls.push(path);
     return {

@@ -92,7 +92,12 @@ async function markLimited(env, path, response, data) {
     errors: Object.fromEntries(
       Object.entries(data?.errors || {}).map(([k, v]) => [
         k,
-        String(v).split(env.API_FOOTBALL_KEY).join('[masqué]').slice(0, 400),
+        String(v)
+          .split(env.API_FOOTBALL_KEY)
+          .join('[masqué]')
+          .split(env.API_RELAY_TOKEN || '\0')
+          .join('[masqué]')
+          .slice(0, 400),
       ]),
     ),
     headers: Object.fromEntries(
@@ -115,6 +120,27 @@ async function markLimited(env, path, response, data) {
       await env.BUCKET.put('api-control/last-limit.json', JSON.stringify(diagnostic));
     } catch {}
   throw limitError(seconds);
+}
+// Les IP de sortie partagées de l'hébergement peuvent être limitées par API-Football
+// indépendamment du quota de l'abonnement. API_FOOTBALL_BASE_URL permet de passer par un
+// relais à IP fixe (voir scripts/relay.mjs) sans changer le reste du code.
+export function providerBase(env) {
+  const base = String(env.API_FOOTBALL_BASE_URL || '').trim();
+  if (!base) return 'https://v3.football.api-sports.io/';
+  let u;
+  try {
+    u = new URL(base);
+  } catch {
+    throw Error('Adresse du relais invalide.');
+  }
+  if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash)
+    throw Error('Le relais doit utiliser HTTPS sans identifiant, requête ou fragment.');
+  if (
+    u.origin !== 'https://v3.football.api-sports.io' &&
+    String(env.API_RELAY_TOKEN || '').length < 32
+  )
+    throw Error('API_RELAY_TOKEN doit contenir au moins 32 caractères pour un relais.');
+  return u.href.endsWith('/') ? u.href : u.href + '/';
 }
 export async function api(env, path, ttl = 300000) {
   if (!env.API_FOOTBALL_KEY) throw Error('La connexion API reste à configurer.');
@@ -141,15 +167,19 @@ export async function api(env, path, ttl = 300000) {
       } catch {}
     if (providerPausedUntil > Date.now())
       throw limitError(Math.ceil((providerPausedUntil - Date.now()) / 1000));
+    const base = providerBase(env);
+    const relay = new URL(base).origin !== 'https://v3.football.api-sports.io';
     const r = await paced(
       () =>
-        fetch('https://v3.football.api-sports.io/' + path, {
+        fetch(base + path, {
           headers: {
             'x-apisports-key': env.API_FOOTBALL_KEY,
             Accept: 'application/json',
             'User-Agent': 'FootScope/1.0',
+            ...(relay ? { 'x-relay-token': env.API_RELAY_TOKEN } : {}),
           },
           cache: 'no-store',
+          redirect: 'error',
           signal: AbortSignal.timeout(20000),
         }),
       env,
@@ -166,6 +196,8 @@ export async function api(env, path, ttl = 300000) {
         .map(([k, v]) => k + ': ' + String(v))
         .join(' · ')
         .split(env.API_FOOTBALL_KEY)
+        .join('[masqué]')
+        .split(env.API_RELAY_TOKEN || '\0')
         .join('[masqué]')
         .slice(0, 700);
       throw Error('API-Football : ' + info);
