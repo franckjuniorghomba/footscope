@@ -27,3 +27,36 @@ Les tests du dépôt démarrent un relais local avec un fournisseur simulé : au
 Pour revenir au fournisseur direct, retirer `API_FOOTBALL_BASE_URL` et `API_RELAY_TOKEN`. Ne pas désactiver les filtres ou les limites pour obtenir un coupon.
 
 Les reprises du programme et des fiches sont limitées à deux essais automatiques. Un changement de date, de filtre, de fiche ou d’onglet de l’application annule la reprise en attente. Une action manuelle commence une nouvelle série d’essais.
+
+## Installation conteneurisée sur le VPS
+
+Prérequis : serveur Linux à IP publique fixe, Docker Engine et Compose installés, domaine pointant vers cette IP, ports 80 et 443 accessibles. Installer Docker depuis [son dépôt officiel](https://docs.docker.com/engine/install/ubuntu/). L’IP de sortie vers API-Football doit être celle de ce VPS.
+
+Copier le projet sur le VPS par le mécanisme d’accès au dépôt privé, puis :
+
+```sh
+cd footscope/deploy/relay
+cp .env.example .env
+chmod 600 .env
+```
+
+Configurer `RELAY_DOMAIN` (nom DNS seul, sans chemin ni schéma) et `RELAY_TOKEN` dans ce fichier local. Ne pas le pousser sur GitHub. Utiliser ensuite :
+
+```sh
+docker compose up --build -d
+docker compose ps
+```
+
+Caddy obtient et renouvelle le certificat HTTPS lorsque le DNS et les ports sont corrects. Le relais n’a aucun port publié : il est joignable uniquement par Caddy dans le réseau des conteneurs. `/health` indique que le processus est prêt, sans appeler le fournisseur. Aucun journal d’accès Caddy contenant les en-têtes n’est activé.
+
+Vérifier `https://RELAY_DOMAIN/health`, puis une requête autorisée vers `/status`, avant de configurer le Worker. Le test réel doit confirmer la réception des données et les quotas, pas seulement le bon démarrage du processus. Activer `API_FOOTBALL_BASE_URL` et `API_RELAY_TOKEN` seulement après ces vérifications.
+
+Arrêt réversible :
+
+```sh
+docker compose stop
+```
+
+Les volumes Caddy conservent les certificats. Ne pas exécuter `docker compose config` dans une sortie partagée : cette commande développe les variables et peut afficher le secret. Les images doivent être mises à jour de façon contrôlée ; confirmer les versions avant l’installation réelle.
+
+Cette préparation ne crée ni VPS, ni domaine, ni facturation. Les accès au compte d’hébergement et le budget restent requis avant provisionnement.
