@@ -73,7 +73,25 @@ const load = (s) =>
   assert.equal(r.status, 200);
   assert.equal(seen.url, 'https://relay.example/status');
   assert.equal(seen.headers['x-relay-token'], 'x'.repeat(32));
-  assert.equal(seen.redirect, 'error');
+  assert.equal(seen.redirect, 'manual');
+}
+// Cloudflare supports manual redirects: reject the response without following or parsing it.
+{
+  const mod = await load('redirect');
+  let calls = 0;
+  globalThis.fetch = async (url, init) => {
+    calls++;
+    assert.equal(init.redirect, 'manual');
+    assert.equal(init.headers['x-relay-token'], undefined);
+    return new Response(null, { status: 302, headers: { Location: 'https://untrusted.example/' } });
+  };
+  const r = await mod.default.fetch(new Request('https://site/api/status'), {
+    API_FOOTBALL_KEY: 'fake-secret',
+    API_RELAY_TOKEN: 'x'.repeat(32),
+  });
+  assert.equal(r.status, 502);
+  assert.equal(calls, 1);
+  assert.match((await r.json()).error, /HTTP 302/);
 }
 console.log(
   'Passed: honest 429 on partial match sheet, provider stop after pause, fixed-IP relay base and token.',

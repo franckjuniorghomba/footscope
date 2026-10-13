@@ -179,7 +179,7 @@ export async function api(env, path, ttl = 300000) {
             ...(relay ? { 'x-relay-token': env.API_RELAY_TOKEN } : {}),
           },
           cache: 'no-store',
-          redirect: 'error',
+          redirect: 'manual',
           signal: AbortSignal.timeout(20000),
         }),
       env,
