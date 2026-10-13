@@ -32,7 +32,7 @@ CADDY_BIN="$work/caddy" node scripts/test-relay-security.mjs
 address=$("${compose[@]}" port https 443)
 # -k est réservé au certificat interne de localhost, jamais au VPS.
 for attempt in {1..30}; do
-  if curl --silent --fail --insecure "https://$address/health" > "$work/health"; then
+  if curl --silent --fail --insecure "https://localhost:${address##*:}/health" > "$work/health"; then
     break
   fi
   sleep 1
