@@ -120,7 +120,7 @@ La CI exécute aussi `bash scripts/check-relay-containers.sh` : construction des
 
 ## Images, mises à jour et retour arrière
 
-Les bases Node 24.21.0 / Alpine 3.23 et Caddy 2.10.2 / Alpine sont figées par version **et digest multiarchitecture** dans les deux Dockerfiles. Le Caddy final ajoute seulement la propriété des répertoires, sans compilateur ; Node copie uniquement le script du relais et fonctionne sous `node`. Le sysctl du conteneur Caddy autorise ses ports bas sans capacité supplémentaire.
+Les bases Node 24.21.0 / Alpine 3.23 et Caddy 2.10.2 / Alpine sont figées par version **et digest multiarchitecture** dans les deux Dockerfiles. Le Caddy final ajoute seulement la propriété des répertoires, sans compilateur ; Node copie uniquement le script du relais et fonctionne sous `node`. La capacité de fichier livrée par l’image Caddy est retirée pour permettre son exécution avec `cap_drop: ALL`. Le sysctl du conteneur Caddy autorise ses ports bas sans capacité supplémentaire.
 
 Pour une mise à jour : lire les notes de sécurité officielles Node/Caddy/Alpine, choisir les versions, vérifier les digests du registre officiel (`docker buildx imagetools inspect node:VERSION` et `caddy:VERSION`), modifier les deux Dockerfiles dans une PR. Si Caddy change, adapter la version exigée par le test ; si Node change, aligner la CI. Exécuter les tests locaux et la CI, puis faire approuver le SHA. Les tags majeurs mobiles ne sont pas admis. Le responsable conserve le SHA précédent et ses images avant `build --pull`, puis lance lui-même la mise à jour avec `docker compose up -d --wait`.
 

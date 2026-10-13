@@ -7,6 +7,11 @@ export RELAY_DOMAIN=localhost
 project="bis203-${RANDOM}-${RANDOM}"
 compose=(docker compose --project-name "$project" -f deploy/relay/compose.yml -f "$work/local.yml")
 cleanup() {
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    "${compose[@]}" ps --all || true
+    "${compose[@]}" logs --no-color --tail 30 || true
+  fi
   "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   rm -rf "$work"
 }
