@@ -1,342 +1,67 @@
 # Relais API-Football à IP fixe
 
-> [!IMPORTANT]
-> **Installation rapide — Droplet DigitalOcean Ubuntu 24.04 neuf**
-> Suivre les étapes numérotées ci-dessous dans l’ordre. Chaque bloc Bash se copie tel quel ; les valeurs non secrètes sont demandées au clavier. Les blocs VPS tournent dans un sous-shell : une erreur arrête le bloc et laisse la session SSH ouverte. Corriger l’erreur avant de relancer la même étape. Transférer une archive minimale depuis le PC : aucun clonage ni identifiant GitHub sur le VPS. Exemple : `203.0.113.42` → `203-0-113-42.sslip.io`. **Si l’invite `$` réapparaît avant la question du jeton, ne rien coller.** Aucun agent ne déploie cette procédure.
-
 Le relais facultatif utilise l’IP de sortie d’un VPS dédié. Le Worker conserve son cache, ses pauses et ses limites. Cela peut résoudre un refus lié à une IP partagée, sans garantir l’accès fournisseur ni valider le modèle statistique.
 
-## Installation rapide
+## Installation rapide : une commande depuis le PC
 
-Prérequis : PC du responsable avec Bash et OpenSSL (macOS, Linux ou WSL), presse-papiers local (`pbcopy`, `wl-copy`, `xclip` ou `clip.exe`), copie locale du dépôt privé sur le PC et accès GitHub sur ce PC sans jeton dans l’URL, et Codex connecté au compte propriétaire du site FootScope dans Sites. Désactiver l’enregistrement du terminal et l’historique/synchronisation du presse-papiers avant toute manipulation de secret. Ne jamais utiliser `set -x`, `curl -v`, `cat .env` ou `docker compose config`.
-
-1. **PC : vérifier le domaine puis ouvrir SSH.** Dans le pare-feu DigitalOcean, autoriser SSH seulement depuis les adresses d’administration, TCP 80/443 et éventuellement UDP 443 ; ne jamais ouvrir 8787. Autoriser les sorties DNS et HTTPS. Les ports Docker publiés nécessitent ce filtrage du fournisseur, pas seulement UFW. Pour ce pilote, utiliser `<ip-avec-tirets>.sslip.io` : par exemple, l’IP illustrative `203.0.113.42` donne `203-0-113-42.sslip.io` (remplacer par l’IP réelle du Droplet). Ce nom résout directement vers l’IP, sans créer de zone DNS. Un domaine propre en DNS seul est aussi possible ; aucun AAAA sans IPv6 fonctionnel. Le certificat public reste obligatoire.
-
-   ```bash
-   (
-     set +x
-     set -euo pipefail
-     trap 'printf "Étape interrompue : commande, saisie ou fichier en échec ; corriger avant de continuer. Ne coller aucun secret dans le shell.\n" >&2' ERR
-     read -rp 'IPv4 publique du Droplet : ' RELAY_IP </dev/tty
-     RELAY_DOMAIN="${RELAY_IP//./-}.sslip.io"
-     printf 'Domaine à saisir sur le VPS et dans Sites : %s\n' "$RELAY_DOMAIN"
-     [[ "$RELAY_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || { printf 'IPv4 invalide.\n' >&2; exit 1; }
-     IFS=. read -r -a RELAY_OCTETS <<< "$RELAY_IP"
-     for RELAY_OCTET in "${RELAY_OCTETS[@]}"; do
-       (( 10#$RELAY_OCTET <= 255 )) || { printf 'IPv4 invalide.\n' >&2; exit 1; }
-     done
-     if command -v getent >/dev/null; then getent hosts "$RELAY_DOMAIN";
-     else nslookup "$RELAY_DOMAIN"; fi
-     read -rp 'Utilisateur SSH (root sur un Droplet neuf) : ' RELAY_SSH_USER </dev/tty
-     [[ "$RELAY_SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { printf 'Utilisateur SSH invalide.\n' >&2; exit 1; }
-     ssh "$RELAY_SSH_USER@$RELAY_IP"
-   )
-   ```
-
-   Vérifier que la réponse DNS contient l’IP du Droplet. Garder le terminal SSH ouvert et ouvrir **un deuxième terminal local sur le PC** pour l’étape 2. Le domaine et l’IP ne sont pas des secrets. [Fonctionnement sslip.io](https://sslip.io/).
-
-2. **PC, terminal local : générer le jeton sans l’afficher et le copier.** Le fichier privé `~/.footscope-relay-token` permet de recopier **le même** jeton en relançant ce bloc ; ne pas le régénérer entre Sites et le VPS. Le jeton est créé uniquement sur le PC. Aucun secret ne passe dans les arguments d’un processus ni dans l’historique du shell.
-
-   ```bash
-   (
-     set +x
-     set -euo pipefail
-     trap 'printf "Étape interrompue : commande, saisie ou fichier en échec ; corriger avant de continuer. Ne coller aucun secret dans le shell.\n" >&2' ERR
-     umask 077
-     if [ -n "${WSL_DISTRO_NAME:-}" ] && command -v clip.exe >/dev/null; then
-       RELAY_CLIPBOARD=(clip.exe)
-     elif command -v pbcopy >/dev/null; then
-       RELAY_CLIPBOARD=(pbcopy)
-     elif command -v wl-copy >/dev/null; then
-       RELAY_CLIPBOARD=(wl-copy)
-     elif command -v xclip >/dev/null; then
-       RELAY_CLIPBOARD=(xclip -selection clipboard)
-     elif command -v clip.exe >/dev/null; then
-       RELAY_CLIPBOARD=(clip.exe)
-     else
-       printf 'Installer un outil de presse-papiers local avant de continuer.\n' >&2
-       exit 1
-     fi
-     if [ ! -e "$HOME/.footscope-relay-token" ]; then
-       RELAY_TOKEN=$(openssl rand -hex 32)
-       printf '%s' "$RELAY_TOKEN" > "$HOME/.footscope-relay-token"
-       unset RELAY_TOKEN
-     fi
-     [ -f "$HOME/.footscope-relay-token" ] && [ ! -L "$HOME/.footscope-relay-token" ] || { printf 'Fichier du jeton absent, non régulier ou lien symbolique.\n' >&2; exit 1; }
-     chmod 600 "$HOME/.footscope-relay-token"
-     RELAY_TOKEN=$(< "$HOME/.footscope-relay-token")
-     [[ "$RELAY_TOKEN" =~ ^[0-9a-f]{64}$ ]] || {
-       printf 'Fichier du jeton invalide ; ne pas activer le relais.\n' >&2
-       exit 1
-     }
-     printf '%s' "$RELAY_TOKEN" | "${RELAY_CLIPBOARD[@]}"
-     unset RELAY_TOKEN
-     printf 'Jeton copié sans affichage ; utiliser uniquement les saisies secrètes.\n'
-   )
-   ```
-
-   Dans Codex connecté au **compte du site existant**, demander : « Préparer les secrets serveur du site FootScope identifié par `.openai/hosting.json` : `API_RELAY_TOKEN` comme secret. Ne pas encore ajouter `API_FOOTBALL_BASE_URL` ; attendre l’étape 6. Ouvrir la saisie sécurisée Sites pour le jeton. Ne pas publier avant ma vérification HTTPS. » Coller le presse-papiers **une fois dans le champ secret de Sites**, jamais dans le message à Codex, un commentaire, une commande ou l’interface FootScope. Conserver `API_FOOTBALL_KEY`. Si la session ne propose pas de saisie sécurisée de secret, conserver le mode direct et faire rétablir ce canal ; ne pas improviser un transfert par conversation. L’activation attend l’étape 6.
-
-3. **VPS, terminal SSH : installer Docker Engine et Compose.** Bloc adapté au [dépôt officiel Docker pour Ubuntu](https://docs.docker.com/engine/install/ubuntu/). Il se relance sans ajouter de doublon au dépôt apt.
-
-   ```bash
-   (
-     set +x
-     set -euo pipefail
-     trap 'printf "Étape interrompue : commande, saisie ou fichier en échec ; corriger avant de continuer. Ne coller aucun secret dans le shell.\n" >&2' ERR
-     sudo apt-get -o DPkg::Lock::Timeout=300 update
-     sudo apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl openssl
-     sudo install -m 0755 -d /etc/apt/keyrings
-     sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-     sudo chmod a+r /etc/apt/keyrings/docker.asc
-     sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF_DOCKER
-   Types: deb
-   URIs: https://download.docker.com/linux/ubuntu
-   Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
-   Components: stable
-   Architectures: $(dpkg --print-architecture)
-   Signed-By: /etc/apt/keyrings/docker.asc
-   EOF_DOCKER
-     sudo apt-get -o DPkg::Lock::Timeout=300 update
-     sudo apt-get -o DPkg::Lock::Timeout=300 install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-     sudo systemctl enable --now docker
-     sudo docker version
-     sudo docker compose version
-   )
-   ```
-
-4. **PC : envoyer uniquement les fichiers du relais, puis VPS : extraire.** Dans le terminal local, se placer à la racine de la copie du dépôt privé. Le SHA complet est celui approuvé sur la PR #2 ; `git archive` ignore les fichiers locaux et les secrets. Aucun accès GitHub, clone, clé de déploiement ou jeton GitHub sur le Droplet. La connexion SSH est celle de l’étape 1 ; vérifier son empreinte avant le transfert.
-
-   ```bash
-   (
-     set +x
-     set -euo pipefail
-     trap 'printf "Transfert interrompu : vérifier saisie, SHA local et SSH ; ne pas continuer.\n" >&2' ERR
-     git rev-parse --show-toplevel >/dev/null
-     read -rp 'SHA complet approuvé à installer : ' RELAY_COMMIT </dev/tty
-     [[ "$RELAY_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { printf 'SHA invalide : 40 caractères hexadécimaux minuscules requis.\n' >&2; exit 1; }
-     git cat-file -e "$RELAY_COMMIT^{commit}" || { printf 'Commit absent du PC : récupérer la branche approuvée sur le PC.\n' >&2; exit 1; }
-     read -rp 'Destination SSH (ex. root@203.0.113.42) : ' RELAY_DEST </dev/tty
-     [[ "$RELAY_DEST" =~ ^[a-z_][a-z0-9_-]*@[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]] || { printf 'Destination SSH invalide.\n' >&2; exit 1; }
-     RELAY_PACKAGE=$(mktemp)
-     trap 'rm -f "$RELAY_PACKAGE"' EXIT
-     git archive --format=tar "$RELAY_COMMIT" deploy/relay scripts/relay.mjs .dockerignore > "$RELAY_PACKAGE"
-     scp "$RELAY_PACKAGE" "$RELAY_DEST:footscope-relay.tar"
-     printf 'Archive transférée depuis le SHA %s ; poursuivre sur le VPS.\n' "$RELAY_COMMIT"
-   )
-   ```
-
-   Dans le terminal SSH du VPS, copier ce bloc. Relançable : les fichiers versionnés sont remplacés, `.env` et les volumes sont conservés. L’archive provient exclusivement du PC de confiance.
-
-   ```bash
-   (
-     set +x
-     set -euo pipefail
-     trap 'printf "Extraction interrompue : archive ou fichier requis absent ; ne pas continuer.\n" >&2' ERR
-     [ -s "$HOME/footscope-relay.tar" ] || { printf 'Archive manquante ou vide : refaire le transfert PC.\n' >&2; exit 1; }
-     mkdir -p "$HOME/footscope"
-     tar -xf "$HOME/footscope-relay.tar" -C "$HOME/footscope"
-     cd "$HOME/footscope"
-     for RELAY_FILE in .dockerignore deploy/relay/compose.yml deploy/relay/Caddyfile deploy/relay/Dockerfile deploy/relay/Dockerfile.caddy deploy/relay/.dockerignore scripts/relay.mjs; do
-       [ -s "$RELAY_FILE" ] || { printf 'Fichier requis absent ou vide : %s\n' "$RELAY_FILE" >&2; exit 1; }
-     done
-     printf 'Fichiers du relais prêts ; aucun dépôt Git nécessaire sur VPS.\n'
-   )
-   ```
-
-   Arborescence attendue sur le VPS (le contexte Docker Node `../..` trouve bien `scripts/relay.mjs`) :
-
-   ```text
-   ~/footscope-relay.tar
-   ~/footscope/
-     .dockerignore          # protège aussi le contexte Node
-     deploy/relay/
-       .dockerignore
-       .env.example         # modèle sans secret
-       Caddyfile
-       Dockerfile
-       Dockerfile.caddy
-       compose.yml
-       .env                 # créé à l’étape 5 seulement
-     scripts/relay.mjs
-   ```
-
-5. **VPS : saisir le même jeton dans `.env` sans affichage.** Si nécessaire, relancer le bloc PC de l’étape 2 pour recopier le jeton inchangé. À l’invite masquée, coller le presse-papiers **une fois**, puis Entrée. Le collage est lu par `read -rsp`, pas par l’interpréteur de commandes ; il ne rejoint pas l’historique. Une interruption ne crée pas de `.env` partiel. Sur une reprise, le fichier existant est conservé ; toute rotation ultérieure doit être coordonnée avec Sites.
-
-   ```bash
-   (
-     set +x
-     set -euo pipefail
-     trap 'printf "Étape interrompue : commande, saisie ou fichier en échec ; corriger avant de continuer. Ne coller aucun secret dans le shell.\n" >&2' ERR
-     cd ~/footscope/deploy/relay
-     umask 077
-     if [ ! -e .env ]; then
-       read -rp 'Nom DNS vérifié (ex. 203-0-113-42.sslip.io) : ' RELAY_DOMAIN </dev/tty
-       while :; do
-         RELAY_DOMAIN=$(printf '%s' "$RELAY_DOMAIN" | tr '[:upper:]' '[:lower:]')
-         RELAY_DOMAIN=${RELAY_DOMAIN#https://}
-         RELAY_DOMAIN=${RELAY_DOMAIN%/}
-         if [[ ${#RELAY_DOMAIN} -le 253 && "$RELAY_DOMAIN" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then break; fi
-         printf 'Domaine invalide : nom DNS seul ou https://nom/ ; sans port, chemin, espace ni identifiants. Ne pas coller le jeton ; corriger le domaine.\n' >&2
-         read -rp 'Nom DNS à corriger : ' RELAY_DOMAIN </dev/tty
-       done
-       printf 'Domaine validé : %s ; attendre maintenant l’invite masquée du jeton.\n' "$RELAY_DOMAIN"
-       read -rsp 'Coller le jeton du PC (non affiché), puis Entrée : ' RELAY_TOKEN </dev/tty
-       printf '\n'
-       [[ "$RELAY_TOKEN" =~ ^[0-9a-f]{64}$ ]] || {
-         printf 'Jeton invalide ; relancer avec le jeton du PC.\n' >&2
-         exit 1
-       }
-       RELAY_ENV_TMP=$(mktemp .env.XXXXXX)
-       trap 'rm -f "$RELAY_ENV_TMP"' EXIT
-       printf 'RELAY_DOMAIN=%s\nRELAY_TOKEN=%s\n' "$RELAY_DOMAIN" "$RELAY_TOKEN" > "$RELAY_ENV_TMP"
-       mv "$RELAY_ENV_TMP" .env
-       unset RELAY_TOKEN
-     fi
-     [ -f .env ] && [ ! -L .env ] && [ -r .env ] || { printf '.env absent, illisible ou lien symbolique ; ne pas continuer.\n' >&2; exit 1; }
-     grep -Eq '^RELAY_DOMAIN=([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' .env &&
-       grep -Eq '^RELAY_TOKEN=[0-9a-f]{64}$' .env && [ "$(wc -l < .env)" -eq 2 ] || {
-       printf '.env existant invalide ; arrêter et coordonner sa réparation avec Sites, sans afficher son contenu.\n' >&2; exit 1;
-     }
-     chmod 600 .env
-     printf '.env prêt, contenu non affiché.\n'
-   )
-   ```
-
-   Attendre chaque invite ; ne jamais coller domaine et jeton ensemble. `https://NOM/`, les majuscules et la barre finale sont normalisés. Un domaine invalide redemande le domaine, sans passer à l’invite du jeton. Une saisie interrompue arrête le bloc avec un message : **si l’invite `$` réapparaît avant la question du jeton, ne rien coller**.
-
-   Le fichier est local, privé (0600), ignoré par Git et par les deux contextes Docker. Le jeton de 64 caractères dépasse le minimum de 32. Ne pas extraire le jeton du VPS pour Sites : sa source de reprise est le fichier privé du PC.
-
-6. **VPS : démarrer et attendre HTTPS sain sans appeler le fournisseur.** Compose attend le premier healthcheck du relais (intervalle 30 s), puis Caddy doit encore obtenir le certificat ACME. La boucle attend jusqu’à 30 essais, chacun borné à 5 s, espacés de 5 s (moins de 5 minutes après Compose). Aucun `curl -k`, aucune reprise infinie. La réponse doit être exactement `{"ready":true}`.
-
-   ```bash
-   (
-     set +x
-     set -euo pipefail
-     trap 'printf "Étape interrompue : commande, saisie ou fichier en échec ; corriger avant de continuer. Ne coller aucun secret dans le shell.\n" >&2' ERR
-     cd ~/footscope/deploy/relay
-     sudo docker compose build --pull
-     sudo docker compose up -d --wait --wait-timeout 120
-     sudo docker compose ps
-     RELAY_DOMAIN=$(sed -n 's/^RELAY_DOMAIN=//p' .env)
-     for RELAY_ATTEMPT in $(seq 1 30); do
-       if RELAY_HEALTH=$(curl --fail --silent --show-error \
-         --connect-timeout 3 --max-time 5 "https://$RELAY_DOMAIN/health") && \
-         [ "$RELAY_HEALTH" = '{"ready":true}' ]; then
-         printf 'HTTPS sain : %s/health\n' "https://$RELAY_DOMAIN"
-         exit 0
-       fi
-       printf 'HTTPS pas encore sain (essai %s/30).\n' "$RELAY_ATTEMPT" >&2
-       if [ "$RELAY_ATTEMPT" -lt 30 ]; then sleep 5; fi
-     done
-     printf 'Échec DNS/TLS/health : vérifier DNS, ports 80/443 et journaux filtrés ; ne pas activer Sites. Session SSH conservée.\n' >&2
-     exit 1
-   )
-   ```
-
-   `/health` ne consomme aucun quota fournisseur. Après succès seulement, confirmer au Codex connecté au compte du site l’activation humaine : `API_FOOTBALL_BASE_URL=https://<domaine-vérifié>/` et `API_RELAY_TOKEN` déjà saisi comme secret. Appliquer la configuration par le workflow Sites et sa version approuvée. Une erreur DNS/TLS, 401, 429 ou 502 doit être signalée comme telle, jamais comme une absence de sélection. L’essai fournisseur facultatif ci-dessous demande une autorisation séparée et un budget d’une requête.
-
-7. **PC : vider le presse-papiers après les deux saisies.** Conserver le fichier privé pour une reprise, ou le supprimer après avoir confirmé que les deux destinations possèdent le même jeton. Ne pas l’ajouter aux livrables, au dépôt ou à une sauvegarde partagée.
-
-   ```bash
-   (
-     set +x
-     set -euo pipefail
-     trap 'printf "Étape interrompue : commande, saisie ou fichier en échec ; corriger avant de continuer. Ne coller aucun secret dans le shell.\n" >&2' ERR
-     if [ -n "${WSL_DISTRO_NAME:-}" ] && command -v clip.exe >/dev/null; then
-       printf '' | clip.exe
-     elif command -v pbcopy >/dev/null; then
-       printf '' | pbcopy
-     elif command -v wl-copy >/dev/null; then
-       wl-copy --clear
-     elif command -v xclip >/dev/null; then
-       printf '' | xclip -selection clipboard
-     elif command -v clip.exe >/dev/null; then
-       printf '' | clip.exe
-     else
-       printf 'Vider le presse-papiers local avant de continuer.\n' >&2
-       exit 1
-     fi
-   )
-   ```
-
-Caddy obtient et renouvelle le certificat public grâce au DNS et aux ports 80/443. Les volumes conservent les certificats. Les deux processus sont non-root ; le relais n’a aucun port publié.
-
-Les journaux d’accès **et runtime/erreur** de Caddy filtrent `request>headers>X-Relay-Token` et `request>headers>X-Apisports-Key` avant leur écriture. Désactiver les seuls journaux d’accès ne protège pas les erreurs. Les champs non sensibles restent disponibles, avec rotation Docker (3 fichiers de 10 Mo par service). Ne pas activer de logger supplémentaire non filtré, ni de traçage. [Référence des filtres](https://caddyserver.com/docs/caddyfile/directives/log), [logger runtime global](https://caddyserver.com/docs/caddyfile/options#log).
-
-HSTS est explicite (`max-age=31536000`), erreurs HTTPS comprises. Ni `includeSubDomains` ni `preload` ne sont imposés au domaine parent. HSTS ne garantit pas la protection du client serveur Node : le Worker doit toujours utiliser HTTPS avec un certificat valide.
-
-### Essai humain facultatif vers /status
-
-Cette commande appelle réellement API-Football **une fois**, sans reprise automatique. L’exécuter seulement après autorisation du responsable et accord sur ce budget. Aucun agent ni aucune CI ne l’exécute. Elle lit la clé sans l’afficher et passe les en-têtes par l’entrée standard de curl, sans valeurs secrètes dans les arguments du processus :
+Sur **WSL Ubuntu du PC**, dans la copie locale du dépôt au commit approuvé de la PR #2 :
 
 ```bash
-(
-  set +x
-  set -euo pipefail
-  trap 'printf "Étape interrompue : commande, saisie ou fichier en échec ; corriger avant de continuer. Ne coller aucun secret dans le shell.\n" >&2' ERR
-  cd ~/footscope/deploy/relay
-  source .env
-  read -rsp 'Clé API-Football (non affichée) : ' API_FOOTBALL_KEY </dev/tty
-  printf '\n'
-  {
-    printf 'x-relay-token: %s\n' "$RELAY_TOKEN"
-    printf 'x-apisports-key: %s\n' "$API_FOOTBALL_KEY"
-  } | curl --fail-with-body --silent --show-error --max-time 25 \
-    --header @- "https://$RELAY_DOMAIN/status"
-  unset API_FOOTBALL_KEY RELAY_TOKEN
-)
+bash scripts/relay-install.sh <ip-du-droplet>
 ```
 
-Vérifier les données, les erreurs applicatives et les quotas de la réponse ; un HTTP 200 seul ne prouve pas l’accès. Ne pas publier le contenu du compte ou les clés. Ne pas utiliser `curl -v`, `set -x` ou `docker compose config` dans une sortie partagée : ils peuvent exposer les secrets.
+Remplacer `<ip-du-droplet>` par l’IPv4 publique réelle. Exemple de domaine dérivé : `203.0.113.42` → `203-0-113-42.sslip.io`. Aucun bloc à coller sur le VPS, aucune saisie ou copie du jeton pendant l’installation.
 
-## Configurer Sites après les vérifications humaines
+Prérequis : Droplet **Ubuntu 24.04** dédié, accès SSH root par clé/agent et empreinte vérifiée dans `known_hosts` sur le PC ; Git, OpenSSL, OpenSSH, curl et util-linux (flock) sur WSL. Un mot de passe seul ne convient pas : le contrôle `ssh -o BatchMode=yes root@IP true` échoue avec un diagnostic avant toute génération. Le script exige une empreinte connue ; vérifier celle du Droplet par un canal de confiance avant la première connexion SSH. La confirmation `oui` autorise l’installation sur ce Droplet ; aucun agent ne lance ce déploiement.
 
-Dans les secrets serveur du site FootScope existant dans Sites, poser exactement :
+Configurer auparavant le pare-feu DigitalOcean : SSH depuis les adresses d’administration, TCP 80/443 et éventuellement UDP 443 ; jamais 8787. Autoriser les sorties DNS et HTTPS. Les ports Docker publiés nécessitent ce filtrage fournisseur, pas seulement UFW. [sslip.io](https://sslip.io/) résout le nom vers l’IP sans créer de zone DNS ; son DNS public et ACME doivent être disponibles. Aucun certificat ignoré.
 
-- `API_FOOTBALL_BASE_URL` : `https://<ip-avec-tirets>.sslip.io/` (adapter au DNS vérifié ; conserver le `/` final).
-- `API_RELAY_TOKEN` : le jeton créé sur le PC à l’étape 2, identique à celui saisi à l’étape 5 sur le VPS. Recopier depuis le fichier privé du PC vers le presse-papiers avec le bloc de l’étape 2, puis coller uniquement dans la saisie sécurisée Sites. Ne jamais lire ou afficher le `.env` du VPS pour ce transfert.
+Le script :
 
-Conserver `API_FOOTBALL_KEY` dans les secrets serveur Sites. L’humain applique ensuite la configuration selon le workflow de publication Sites. L’exploitant du VPS peut accéder à la clé en transit : réserver ce relais à une machine maîtrisée. Le relais refuse les routes/méthodes non autorisées et les redirections ; il ne transmet pas son jeton au fournisseur et conserve 429 et `Retry-After`.
+1. Valide l’IPv4, demande confirmation et vérifie SSH sans interaction.
+2. Génère le jeton sur le PC, sans affichage, dans `~/.config/footscope/relay-token` (0600, dossier 0700, hors dépôt). Réutilise ce fichier sur toute reprise ; ne jamais le supprimer pour contourner une erreur.
+3. Envoie une archive `git archive HEAD` contenant **uniquement** `deploy/relay/` et `scripts/relay.mjs`, par SCP. Les modifications non committées ne sont pas installées. Aucun Git ni accès GitHub sur le VPS.
+4. Envoie le script distant sur stdin SSH ; sa fonction finale lit le jeton sur cette même entrée, sans argument de commande ni historique. Crée le `.env` en 0600 et s’arrête si un fichier existant diffère du domaine/jeton PC, sans l’écraser. Installe Docker via le [dépôt officiel Ubuntu en deb822](https://docs.docker.com/engine/install/ubuntu/) si Docker/Compose ne fonctionnent pas déjà ; aucun upgrade implicite d’une installation opérationnelle. Les paquets Docker suivent le dépôt stable lors de la première installation ; les images applicatives sont figées. Un conflit de paquets doit être corrigé par l’exploitant, sans désinstallation automatique.
+5. Extrait dans `~/footscope`, génère le `.dockerignore` racine excluant les `.env`, `.git` et les artefacts locaux, puis lance `docker compose up --build -d --wait --wait-timeout 120`. Les fichiers versionnés sont remplacés ; jeton et volumes sont conservés. Des verrous PC/VPS empêchent deux installations simultanées.
+6. Attend `/health` HTTPS : 30 essais maximum, timeout de 5 s, pause de 5 s (moins de 5 minutes après Compose). Exige exactement `{"ready":true}`, puis vérifie encore HTTPS depuis le PC (timeout 10 s). Aucun appel fournisseur.
+7. Affiche seulement `API_FOOTBALL_BASE_URL=https://<domaine>/` et le nom `API_RELAY_TOKEN`. **À la toute fin**, `clip.exe < fichier` copie le jeton dans Windows sans l’afficher. Si `clip.exe` manque, activer l’interopérabilité Windows de WSL et relancer la même commande ; le jeton sera réutilisé. Aucun repli par affichage du secret.
 
-## Validation locale et CI
+Après succès, dans Codex connecté au **compte propriétaire du site existant** identifié par `.openai/hosting.json`, demander la saisie sécurisée du secret serveur `API_RELAY_TOKEN`. Coller le jeton **une seule fois dans ce champ secret**, jamais dans un message de conversation, commentaire ou commande. Poser `API_FOOTBALL_BASE_URL` avec le `/` final, conserver `API_FOOTBALL_KEY`, puis faire appliquer la configuration par le responsable via le workflow Sites. Si le canal de saisie sécurisé n’est pas disponible, conserver le mode direct. Vider le presse-papiers après saisie ; désactiver au préalable son historique/synchronisation et l’enregistrement du terminal. Conserver le fichier privé pour les reprises ; ne pas le joindre aux livrables ou aux sauvegardes partagées.
 
-`npm ci` et `npm run check` restent sans secrets. Pour tester Caddy 2.10.2 installé localement :
+Toute erreur arrête l’installation avant la copie du jeton et l’activation Sites. Corriger puis relancer la même commande. Une panne DNS/TLS ou un refus fournisseur doit être signalé comme tel, jamais comme une absence de sélection. Ne jamais utiliser `set -x`, `curl -v`, `cat .env` ou `docker compose config` dans une sortie partagée.
+
+## Sécurité et validation
+
+Les deux processus sont non-root ; le relais n’a aucun port publié. Les journaux d’accès **et runtime/erreur** de Caddy filtrent `request>headers>X-Relay-Token` et `request>headers>X-Apisports-Key` avant écriture. Les champs non sensibles restent disponibles, avec rotation Docker (3 fichiers de 10 Mo par service). Ne pas ajouter de logger non filtré. [Filtres](https://caddyserver.com/docs/caddyfile/directives/log), [logger runtime](https://caddyserver.com/docs/caddyfile/options#log).
+
+HSTS est explicite (`max-age=31536000`), erreurs HTTPS comprises, sans `includeSubDomains` ni `preload`. Le Worker utilise toujours HTTPS avec un certificat valide. L’exploitant du VPS peut accéder à la clé en transit : réserver le relais à une machine maîtrisée. Le relais refuse les routes/méthodes non autorisées et les redirections, ne transmet pas son jeton au fournisseur et conserve 429 et `Retry-After`.
+
+`npm ci` et `npm run check` utilisent uniquement des données fictives. `tests/relay-install.mjs` simule SSH, SCP, Docker, curl et le presse-papiers dans le PATH, avec archive/extraction et exécution Bash réelles. Il vérifie reprise, permissions, arrêts et absence du jeton fictif dans les sorties, arguments/environnements des commandes et fichiers du dépôt. `bash scripts/check-relay-containers.sh` en CI construit les images figées et vérifie utilisateurs, Compose et HTTPS sur loopback. Aucun déploiement.
+
+Pour tester les journaux avec Caddy 2.10.2 local : définir `CADDY_BIN` vers le binaire et lancer `node scripts/test-relay-security.mjs`. PKI éphémère et fournisseur simulé ; zéro fuite exigée et HSTS sur 200/401/404/502. Avec l’ancien Caddyfile en argument, le test échoue sur la fuite.
+
+## Mises à jour et retour arrière
+
+Node 24.21.0 / Alpine 3.23 et Caddy 2.10.2 / Alpine sont figés par version et digest multiarchitecture. Aucun compilateur dans les images finales. La capacité de fichier de Caddy est retirée pour `cap_drop: ALL` ; son sysctl autorise les ports bas sans capacité supplémentaire.
+
+Pour modifier les images : lire les notes officielles, vérifier les digests avec `docker buildx imagetools inspect`, modifier les Dockerfiles dans une PR, aligner les tests/CI et faire approuver le SHA après CI verte. Conserver le SHA précédent sécurisé. Sur le PC, récupérer et sélectionner le nouveau commit approuvé puis relancer la commande d’installation ; aucune rotation du jeton.
+
+Retour arrière, déclenché par le responsable : retirer `API_FOOTBALL_BASE_URL` et `API_RELAY_TOKEN` des secrets Sites, appliquer le mode direct **avant** l’arrêt du relais. Cela peut réintroduire le refus de l’IP partagée. Depuis le PC :
 
 ```bash
-(
-  set +x
-  set -euo pipefail
-  trap 'printf "Étape interrompue : commande, saisie ou fichier en échec ; corriger avant de continuer. Ne coller aucun secret dans le shell.\n" >&2' ERR
-  read -rp 'Chemin du binaire Caddy 2.10.2 local : ' CADDY_BIN </dev/tty
-  [ -f "$CADDY_BIN" ] && [ -x "$CADDY_BIN" ] || { printf 'Binaire Caddy absent ou non exécutable.\n' >&2; exit 1; }
-  export CADDY_BIN
-  node scripts/test-relay-security.mjs
-)
+ssh root@<ip-du-droplet> 'cd ~/footscope/deploy/relay && docker compose stop'
 ```
 
-Le test démarre HTTPS sur loopback avec une PKI éphémère et un fournisseur simulé, puis arrête le relais. Il recherche les valeurs fictives dans stdout/stderr et exige des journaux d’accès/erreur ainsi que HSTS sur 200/401/404/502. Avec l’ancien Caddyfile passé en argument, il échoue sur la fuite. Aucune requête fournisseur ni ACME publique.
+Les volumes et `.env` sont conservés. Pour revenir à une version précédente **déjà sécurisée**, sélectionner son SHA dans une copie PC. Si ce commit précède le script, restaurer seulement le script approuvé avec `git restore --source=<SHA-du-script-approuvé> -- scripts/relay-install.sh` (sans créer de commit), puis relancer `bash scripts/relay-install.sh <ip-du-droplet>` : l’archive utilise HEAD. Ne pas restaurer le Caddyfile vulnérable, supprimer les volumes ou desserrer les filtres.
 
-La CI exécute aussi `bash scripts/check-relay-containers.sh` : construction des images figées, vérification des utilisateurs non-root et démarrage Compose sur localhost uniquement. Elle ne déploie rien.
+## Annexe : procédure manuelle pour l’exploitant
 
-## Images, mises à jour et retour arrière
+Cette voie est réservée au diagnostic d’un exploitant ; l’installation rapide ci-dessus reste le parcours du responsable. Aucun transfert de secret par copier-coller entre terminaux.
 
-Les bases Node 24.21.0 / Alpine 3.23 et Caddy 2.10.2 / Alpine sont figées par version **et digest multiarchitecture** dans les deux Dockerfiles. Le Caddy final ajoute seulement la propriété des répertoires, sans compilateur ; Node copie uniquement le script du relais et fonctionne sous `node`. La capacité de fichier livrée par l’image Caddy est retirée pour permettre son exécution avec `cap_drop: ALL`. Le sysctl du conteneur Caddy autorise ses ports bas sans capacité supplémentaire.
+1. Vérifier SSH, DNS, pare-feu et Ubuntu 24.04. Installer Docker Engine et Compose en suivant la méthode officielle deb822 liée ci-dessus (clé `/etc/apt/keyrings/docker.asc`, source `/etc/apt/sources.list.d/docker.sources`, `DPkg::Lock::Timeout=300`). Ne pas remplacer une installation fonctionnelle.
+2. Sur le PC au SHA approuvé, produire `git archive --format=tar HEAD deploy/relay scripts/relay.mjs` dans un fichier temporaire privé et le transférer par SCP. Sur le VPS, extraire dans `~/footscope`. Générer le `.dockerignore` racine avec les exclusions du script avant tout build (`.env`, `.git` et artefacts locaux). Le contexte Node `../..` trouve alors `scripts/relay.mjs` ; le contexte Caddy possède déjà son `.dockerignore`.
+3. Pour le `.env`, employer le transfert sur stdin de `scripts/relay-install.sh` : le jeton vient uniquement du fichier privé PC ; validation stricte avant écriture atomique 0600 ; fichier existant identique conservé, différent refusé. Ne pas saisir un jeton dans un shell SSH interactif ni sourcer un `.env` non contrôlé.
+4. Dans `~/footscope/deploy/relay`, lancer `docker compose up --build -d --wait --wait-timeout 120`. Attendre HTTPS sain avec la boucle bornée du script, puis vérifier depuis le PC. Les volumes conservent les certificats publics renouvelés par Caddy.
+5. Configurer Sites seulement après santé vérifiée, via son champ secret. La copie Windows intervient exclusivement à la fin du script PC. Pour toute reprise, utiliser le même fichier privé.
 
-Pour une mise à jour : lire les notes de sécurité officielles Node/Caddy/Alpine, choisir les versions, vérifier les digests du registre officiel (`docker buildx imagetools inspect node:VERSION` et `caddy:VERSION`), modifier les deux Dockerfiles dans une PR. Si Caddy change, adapter la version exigée par le test ; si Node change, aligner la CI. Exécuter les tests locaux et la CI, puis faire approuver le SHA. Les tags majeurs mobiles ne sont pas admis. Le responsable conserve le SHA précédent et ses images avant `build --pull`, puis lance lui-même la mise à jour avec `docker compose up -d --wait`.
-
-Retour au mode direct : l’humain retire `API_FOOTBALL_BASE_URL` et `API_RELAY_TOKEN` des secrets Sites et applique sa configuration. Cela peut réintroduire le refus de l’IP partagée. Ensuite, sur le VPS :
-
-```bash
-(
-  set +x
-  set -euo pipefail
-  trap 'printf "Étape interrompue : commande, saisie ou fichier en échec ; corriger avant de continuer. Ne coller aucun secret dans le shell.\n" >&2' ERR
-  cd ~/footscope/deploy/relay
-  sudo docker compose stop
-)
-```
-
-Les volumes et `.env` sont conservés. Pour reprendre, `sudo docker compose up -d --wait`. Pour revenir à une version précédente **déjà sécurisée**, recréer sur le PC l’archive du SHA précédent et refaire les deux blocs de l’étape 4, puis reconstruire et redémarrer comme ci-dessus. Ne pas revenir à l’ancien Caddyfile vulnérable ; en cas d’incident sur cette première version sécurisée, arrêter le relais et revenir au mode direct. Ne pas supprimer les volumes de certificats et ne pas desserrer les limites ou filtres de FootScope.
-
-Les reprises du programme et des fiches restent limitées à deux essais automatiques ; un changement de date, filtre, fiche ou onglet annule la reprise, une action manuelle commence une nouvelle série.
+Un essai `/status` appelle réellement API-Football et requiert une autorisation distincte du responsable avec un budget d’une requête. Préparer un script dédié lisant la clé sans affichage et transmettant les en-têtes à curl via stdin (`--header @-`), sans reprise automatique. Aucun agent ni aucune CI ne l’exécute ; ne pas publier les données du compte. `/health` suffit à l’installation et ne consomme aucun quota fournisseur.
