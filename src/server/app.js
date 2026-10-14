@@ -3,6 +3,7 @@ import { POLICY } from './policy.js';
 import { json } from './http.js';
 import { assistant } from './assistant.js';
 import { performance } from './storage.js';
+import { exportEvidence, finishEvidence } from './jobs.js';
 import { page, css, clientScript } from '../../.build/web-assets.js';
 
 export default {
@@ -14,6 +15,11 @@ export default {
     )
       return json({ error: 'Méthode non autorisée' }, 405);
     try {
+      if (u.pathname === '/api/assistant/evidence') {
+        if (req.method !== 'GET')
+          return json({ error: 'Méthode non autorisée', code: 'METHOD_NOT_ALLOWED' }, 405);
+        return await exportEvidence(req, env);
+      }
       if (u.pathname === '/api/diagnostics') {
         const obj = env.BUCKET ? await env.BUCKET.get('api-control/last-limit.json') : null;
         return json({ lastLimit: obj ? await obj.json() : null });
@@ -34,8 +40,12 @@ export default {
           policy: POLICY,
           modelValidated: false,
         });
-      if (req.method === 'POST' && u.pathname.startsWith('/api/assistant/'))
-        return await assistant(req, env, u.pathname);
+      if (req.method === 'POST' && u.pathname.startsWith('/api/assistant/')) {
+        const response = await assistant(req, env, u.pathname);
+        return u.pathname === '/api/assistant/propose'
+          ? await finishEvidence(req, env, response)
+          : response;
+      }
       if (u.pathname === '/api/status') {
         const d = await api(env, 'status', 60000);
         return json({
