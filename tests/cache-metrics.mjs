@@ -58,6 +58,7 @@ assert.deepEqual(cache.routes.status, {
   requests: 1,
   duplicateRequests: 0,
   quotaRefusals: 0,
+  spacingObservationFailures: 0,
 });
 assert.equal(cache.totals.hits, 1);
 assert.equal(cache.totals.hitRate, 0.5);

@@ -3,7 +3,9 @@ const memory = new Map(),
   pending = new Map();
 let queue = Promise.resolve(),
   lastCall = 0,
-  providerPausedUntil = 0;
+  providerPausedUntil = 0,
+  providerSpacing = 0,
+  spacingObservedAt = 0;
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 // Compteurs du cache par isolat, en mémoire : aucune écriture R2 supplémentaire. Ils repartent
 // de zéro à chaque nouvel isolat ; `since` indique leur début. Seul le chemin normalisé
@@ -33,6 +35,7 @@ function countMetric(path, field) {
         requests: 0,
         duplicateRequests: 0,
         quotaRefusals: 0,
+        spacingObservationFailures: 0,
       }),
     );
   m[field]++;
@@ -56,6 +59,7 @@ export function cacheMetrics() {
     requests: 0,
     duplicateRequests: 0,
     quotaRefusals: 0,
+    spacingObservationFailures: 0,
   };
   for (const m of Object.values(routes)) for (const k in totals) totals[k] += m[k];
   const hits = totals.memoryHits + totals.bucketHits;
@@ -76,11 +80,82 @@ export function resetCacheMetrics() {
   metricsSince = new Date().toISOString();
 }
 const API_SPACING_MS = 6500;
-export async function reserveProviderSlot(env, spacing = API_SPACING_MS) {
+// Les en-têtes requests-* portent le quota journalier, limit le débit par minute.
+// Une observation périmée ne permet plus d'accélérer un nouvel isolat.
+const SPACING_TTL_MS = 60000;
+function currentSpacing(state = { spacing: providerSpacing, observedAt: spacingObservedAt }) {
+  return Number.isFinite(state.spacing) &&
+    state.spacing >= 250 &&
+    Date.now() - state.observedAt < SPACING_TTL_MS &&
+    state.observedAt <= Date.now()
+    ? state.spacing
+    : Math.max(API_SPACING_MS, Number.isFinite(state.spacing) ? state.spacing : 0);
+}
+function headerNumber(headers, name) {
+  const value = headers.get(name);
+  return value !== null && /^\d+$/.test(value) && Number.isSafeInteger(Number(value))
+    ? Number(value)
+    : null;
+}
+function responseSpacing(headers) {
+  const minute = headerNumber(headers, 'x-ratelimit-limit');
+  const daily = headerNumber(headers, 'x-ratelimit-requests-limit');
+  const remaining = headerNumber(headers, 'x-ratelimit-requests-remaining');
+  if (!minute || !daily || minute > daily || remaining === null || remaining > daily)
+    return API_SPACING_MS;
+  if (remaining / daily < 0.05) return Math.max(60000, API_SPACING_MS);
+  return Math.max(250, Math.ceil(1000 / 3), Math.ceil(60000 / (minute * 0.7)));
+}
+// L'observation ne doit jamais remplacer une réponse fournisseur, surtout un refus.
+// Le journal ne reprend ni l'erreur R2 brute, ni le chemin ou les valeurs de paramètres.
+async function observeSpacing(env, spacing, path) {
+  try {
+    await persistSpacing(env, spacing);
+  } catch {
+    countMetric(path, 'spacingObservationFailures');
+    console.warn('Observation de cadence fournisseur non partagée (R2).');
+  }
+}
+async function persistSpacing(env, spacing) {
+  providerSpacing = spacing;
+  spacingObservedAt = Date.now();
+  if (!env.BUCKET) return;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const obj = await env.BUCKET.get('api-control/next-slot.json');
+    const state = obj ? await obj.json() : {};
+    const onlyIf = obj ? { etagMatches: obj.etag } : new Headers({ 'If-None-Match': '*' });
+    const written = await env.BUCKET.put(
+      'api-control/next-slot.json',
+      JSON.stringify({
+        ...state,
+        // Ne jamais avancer un créneau déjà réservé ; étendre après un ralentissement.
+        next: Math.max(
+          Number(state.next) || 0,
+          (Number(state.last) || 0) + spacing,
+          spacing > currentSpacing(state) ? Date.now() + spacing : 0,
+        ),
+        notBefore: spacing > currentSpacing(state) ? Date.now() + spacing : state.notBefore || 0,
+        spacing,
+        observedAt: spacingObservedAt,
+      }),
+      { onlyIf },
+    );
+    if (written !== null) return;
+    await pause(10 + Math.random() * 20);
+  }
+  const error = limitError(10);
+  error.code = 'API_QUEUE_BUSY';
+  throw error;
+}
+export async function reserveProviderSlot(env, spacing) {
+  const explicitSpacing = spacing;
+  spacing ??= currentSpacing();
   if (!env.BUCKET) return Math.max(Date.now(), lastCall + spacing);
   for (let attempt = 0; attempt < 20; attempt++) {
     const obj = await env.BUCKET.get('api-control/next-slot.json');
-    const next = obj ? (await obj.json()).next : 0;
+    const state = obj ? await obj.json() : {};
+    const next = state.next;
+    const sharedSpacing = obj ? currentSpacing(state) : spacing;
     const slot = Math.max(Date.now(), Number(next) || 0);
     if (slot - Date.now() > 60000) {
       const error = limitError(Math.ceil((slot - Date.now()) / 1000));
@@ -90,7 +165,7 @@ export async function reserveProviderSlot(env, spacing = API_SPACING_MS) {
     const onlyIf = obj ? { etagMatches: obj.etag } : new Headers({ 'If-None-Match': '*' });
     const written = await env.BUCKET.put(
       'api-control/next-slot.json',
-      JSON.stringify({ next: slot + spacing }),
+      JSON.stringify({ ...state, last: slot, next: slot + (explicitSpacing ?? sharedSpacing) }),
       { onlyIf },
     );
     if (written !== null) return slot;
@@ -102,8 +177,20 @@ export async function reserveProviderSlot(env, spacing = API_SPACING_MS) {
 }
 function paced(task, env) {
   const next = queue.then(async () => {
-    const slot = await reserveProviderSlot(env);
-    await pause(Math.max(0, slot - Date.now()));
+    let slot = await reserveProviderSlot(env);
+    for (let attempt = 0; ; attempt++) {
+      if (attempt >= 20) {
+        const error = limitError(10);
+        error.code = 'API_QUEUE_BUSY';
+        throw error;
+      }
+      await pause(Math.max(0, slot - Date.now()));
+      if (!env.BUCKET) break;
+      const obj = await env.BUCKET.get('api-control/next-slot.json');
+      const state = obj ? await obj.json() : {};
+      if (!(slot < state.notBefore)) break;
+      slot = await reserveProviderSlot(env);
+    }
     lastCall = Date.now();
     if (env.BUCKET) {
       const obj = await env.BUCKET.get('api-control/cooldown.json');
@@ -190,6 +277,7 @@ async function markLimited(env, path, response, data) {
       );
       await env.BUCKET.put('api-control/last-limit.json', JSON.stringify(diagnostic));
     } catch {}
+  await observeSpacing(env, API_SPACING_MS, path);
   throw limitError(seconds);
 }
 // Les IP de sortie partagées de l'hébergement peuvent être limitées par API-Football
@@ -265,9 +353,9 @@ export async function api(env, path, ttl = 300000) {
       throw limitError(Math.ceil((providerPausedUntil - Date.now()) / 1000));
     const base = providerBase(env);
     const relay = new URL(base).origin !== 'https://v3.football.api-sports.io';
-    const r = await paced(() => {
+    return paced(async () => {
       countRequest(path);
-      return fetch(base + path, {
+      const r = await fetch(base + path, {
         headers: {
           'x-apisports-key': env.API_FOOTBALL_KEY,
           Accept: 'application/json',
@@ -278,40 +366,48 @@ export async function api(env, path, ttl = 300000) {
         redirect: 'manual',
         signal: AbortSignal.timeout(20000),
       });
+      if (r.status === 429) return markLimited(env, path, r, {});
+      if (!r.ok) {
+        await observeSpacing(env, API_SPACING_MS, path);
+        throw Error('Le fournisseur est indisponible (HTTP ' + r.status + ').');
+      }
+      const spacing = responseSpacing(r.headers);
+      const d = await r.json();
+      if (d.errors && Object.keys(d.errors).length) {
+        const rate = Object.entries(d.errors).some(
+          ([k, v]) =>
+            /rateLimit/i.test(k) ||
+            (/rate|limit/i.test(k) && /minute|second|too many|rate/i.test(String(v))),
+        );
+        if (rate) return markLimited(env, path, r, d);
+        await observeSpacing(env, API_SPACING_MS, path);
+        const info = Object.entries(d.errors)
+          .map(([k, v]) => k + ': ' + String(v))
+          .join(' · ')
+          .split(env.API_FOOTBALL_KEY)
+          .join('[masqué]')
+          .split(env.API_RELAY_TOKEN || '\0')
+          .join('[masqué]')
+          .slice(0, 700);
+        throw Error('API-Football : ' + info);
+      }
+      await observeSpacing(env, spacing, path);
+      const result = { ...d, retrievedAt: new Date().toISOString() };
+      const cached = { at: Date.now(), data: result };
+      memory.set(path, cached);
+      if (env.BUCKET)
+        try {
+          await env.BUCKET.put(cacheKey, JSON.stringify(cached));
+        } catch {}
+      if (memory.size > 200) memory.delete(memory.keys().next().value);
+      if (path.startsWith('fixtures?date='))
+        for (const f of d.response || [])
+          memory.set('fixtures?id=' + f.fixture.id, { at: Date.now(), data: { response: [f] } });
+      // Réponse réellement reçue du fournisseur : seule entrée de l'archive des cotes (BIS-192).
+      // L'écriture ne retarde jamais la réponse : elle continue en arrière-plan.
+      inBackground(env, archiveOdds(env, path, result));
+      return result;
     }, env);
-    if (r.status === 429) return markLimited(env, path, r, {});
-    if (!r.ok) throw Error('Le fournisseur est indisponible (HTTP ' + r.status + ').');
-    const d = await r.json();
-    if (d.errors && Object.keys(d.errors).length) {
-      const rate = Object.entries(d.errors).some(
-        ([k, v]) => /rate|limit/i.test(k) && /minute|second|too many|rate/i.test(String(v)),
-      );
-      if (rate) return markLimited(env, path, r, d);
-      const info = Object.entries(d.errors)
-        .map(([k, v]) => k + ': ' + String(v))
-        .join(' · ')
-        .split(env.API_FOOTBALL_KEY)
-        .join('[masqué]')
-        .split(env.API_RELAY_TOKEN || '\0')
-        .join('[masqué]')
-        .slice(0, 700);
-      throw Error('API-Football : ' + info);
-    }
-    const result = { ...d, retrievedAt: new Date().toISOString() };
-    const cached = { at: Date.now(), data: result };
-    memory.set(path, cached);
-    if (env.BUCKET)
-      try {
-        await env.BUCKET.put(cacheKey, JSON.stringify(cached));
-      } catch {}
-    if (memory.size > 200) memory.delete(memory.keys().next().value);
-    if (path.startsWith('fixtures?date='))
-      for (const f of d.response || [])
-        memory.set('fixtures?id=' + f.fixture.id, { at: Date.now(), data: { response: [f] } });
-    // Réponse réellement reçue du fournisseur : seule entrée de l'archive des cotes (BIS-192).
-    // L'écriture ne retarde jamais la réponse : elle continue en arrière-plan.
-    inBackground(env, archiveOdds(env, path, result));
-    return result;
   })();
   pending.set(path, job);
   job.catch((e) => {
