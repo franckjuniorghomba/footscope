@@ -187,6 +187,6 @@ export async function performance(env) {
         : null,
     modelValidated: false,
     scope:
-      'Sept derniers jours, 80 coupons maximum ; événements dédoublonnés, première estimation conservée, une unité fictive par sélection. IC 95 % : Wilson par sélection pour le taux de réussite ; bootstrap par match pour le ROI (mulberry32, graine 164, 1000 rééchantillonnages, percentiles interpolés). Avertissement sous 100 matchs distincts réglés. Calibration : tranches [0,70 ; 0,75), puis pas de 0,05 ; dernière tranche [0,95 ; 1,00]. Probabilités inférieures à 0,70, supérieures à 1 ou absentes/non finies exclues de la calibration. Ce suivi prospectif exploratoire ne constitue pas un test historique indépendant ni une validation du modèle.',
+      "Sept derniers jours, 80 coupons maximum ; événements dédoublonnés, première estimation conservée, une unité fictive par sélection. IC 95 % : Wilson par sélection pour le taux de réussite ; bootstrap par match pour le ROI (mulberry32, graine 164, 1000 rééchantillonnages, percentiles interpolés). L'IC de Wilson suppose des sélections indépendantes : plusieurs sélections d'un même match le rendent trop étroit ; l'IC du ROI, calculé par match, en tient compte. Avertissement sous 100 matchs distincts réglés. Calibration : tranches [0,70 ; 0,75), puis pas de 0,05 ; dernière tranche [0,95 ; 1,00]. Probabilités inférieures à 0,70, supérieures à 1 ou absentes/non finies exclues de la calibration. Ce suivi prospectif exploratoire ne constitue pas un test historique indépendant ni une validation du modèle.",
   };
 }

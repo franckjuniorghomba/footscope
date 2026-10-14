@@ -62,6 +62,11 @@ close(stats.winRateCI[0], 0.397, 0.001);
 close(stats.winRateCI[1], 0.892, 0.001);
 assert.equal(stats.sampleWarning, true);
 assert.equal(stats.modelValidated, false);
+assert(
+  stats.scope.includes(
+    "L'IC de Wilson suppose des sélections indépendantes : plusieurs sélections d'un même match le rendent trop étroit ; l'IC du ROI, calculé par match, en tient compte.",
+  ),
+);
 assert.deepEqual(await performance(ten), stats, 'Bootstrap must restart its fixed seed each call');
 
 // Three winning events on one match and one loss on another: cluster draws
