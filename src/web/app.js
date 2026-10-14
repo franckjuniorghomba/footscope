@@ -17,6 +17,9 @@ $('#date').value = today;
 let fixtures = [],
   odds = new Map(),
   coupon = [],
+  // Dernière copie du ticket du jour dans le coupon : sert seulement à choisir la note du
+  // coupon (copie intacte ou coupon manuel). Aucune probabilité n'est calculée ici.
+  ticketCopy = null,
   history = [],
   pageNum = 0,
   totalPages = 0,
@@ -42,6 +45,45 @@ function time(s) {
 }
 function stamp(s) {
   return s ? new Date(s).toLocaleString('fr-CA', { timeZone: tz }) : 'Non renseignée';
+}
+// Format du design system : « Sam. 17 oct. · 10h00 », toujours en GMT−5.
+function kickoff(s) {
+  if (!s) return '—';
+  const day = new Date(s).toLocaleDateString('fr-FR', {
+    timeZone: tz,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  });
+  return day.charAt(0).toUpperCase() + day.slice(1) + ' · ' + time(s).replace(/\s?h\s?/, 'h');
+}
+// Écusson neutre : aucun logo de club, seulement les initiales. Les préfixes génériques
+// (« FC », « AS »…), les particules en minuscules (« de ») et les nombres sont ignorés :
+// « Olympique de Marseille » donne « OM », « 1. FC Köln » donne « KÖ ».
+const GENERIC_CLUB_WORDS = new Set(
+  'AC AFC AS BK CA CD CF CS FC FK IF NK RC SC SD SK SS SSC SV UD US'.split(' '),
+);
+function initials(name) {
+  const words = String(name ?? '')
+    .split(/[\s\-–—.']+/)
+    .filter(Boolean);
+  const named = words.filter(
+    (w) => !GENERIC_CLUB_WORDS.has(w.toUpperCase()) && !/^(\d+|\p{Ll}.*)$/u.test(w),
+  );
+  const pick = named.length ? named : words;
+  const letters =
+    pick.length > 1 ? [pick[0][0], pick[1][0]] : Array.from(pick[0] || '?').slice(0, 2);
+  return letters.join('').toUpperCase();
+}
+function crest(name, size = '') {
+  return '<span class="crest ' + size + '" aria-hidden="true">' + esc(initials(name)) + '</span>';
+}
+// Nom d'équipe : coupé sur deux lignes au plus, puis abrégé ; le nom complet reste en title.
+function teamName(name) {
+  return '<span class="teamname" title="' + esc(name) + '">' + esc(name) + '</span>';
+}
+function moveFocus(el) {
+  if (el?.focus) el.focus();
 }
 function fresh(s) {
   const age = Date.now() - Date.parse(s);
@@ -112,11 +154,21 @@ function scheduleRetry(seconds, gen, target, label, attempt, action) {
 async function init() {
   try {
     const d = await get('/api/status');
-    $('#connection').textContent =
-      (d.subscription?.plan || 'API') + ' · ' + (d.subscription?.active ? 'actif' : 'inactif');
+    const active = !!d.subscription?.active;
+    // subscription décrit l'abonnement au fournisseur API-Football, pas une offre Footscope :
+    // il est affiché à côté du quota qu'il fixe, jamais comme un statut de l'utilisateur.
+    $('#connection').textContent = active ? 'API-Football connecté' : 'API-Football inactif';
+    $('#connectionPill').classList.toggle('off', !active);
     $('#quota').textContent = (d.requests?.limit_day || '—').toLocaleString('fr-CA');
+    $('#providerPlan').textContent =
+      'API-Football · plan ' +
+      (d.subscription?.plan || 'inconnu') +
+      ' · ' +
+      (active ? 'actif' : 'inactif');
+    $('#providerPlan').classList.remove('hidden');
   } catch (e) {
     $('#connection').textContent = 'Connexion à vérifier';
+    $('#connectionPill').classList.add('off');
   }
   await load();
 }
@@ -209,36 +261,43 @@ function render() {
   $('#matchPage').textContent = 'PAGE ' + matchPage + ' / ' + pages;
   $('#count').textContent = fixtures.length;
   $('#oddsCount').textContent = odds.size;
-  $('#visibleCount').textContent = rows.length + ' MATCHS';
-  $('#matches').classList.remove('loader');
+  $('#visibleCount').textContent = rows.length + (rows.length > 1 ? ' matchs' : ' match');
   $('#matches').innerHTML = rows.length
     ? visible
         .map((f) => {
           const o = odds.get(f.fixture.id);
+          const label = esc(f.teams.home.name) + ' contre ' + esc(f.teams.away.name);
           return (
-            '<article class="match"><div class="time">' +
-            time(f.fixture.date) +
-            '<small>' +
-            esc(f.fixture.status.short) +
-            '</small></div><div><div class="league">' +
-            esc(f.league.country) +
-            ' / ' +
+            '<article class="match"><div class="matchmeta"><span class="league">' +
             esc(f.league.name) +
-            '</div><div class="teams">' +
-            esc(f.teams.home.name) +
-            '<span>vs</span>' +
-            esc(f.teams.away.name) +
-            '</div></div><div class="right"><span class="tag ' +
-            (o && !fresh(o.update) ? 'warn' : '') +
+            ' · ' +
+            esc(f.league.country) +
+            '</span><time datetime="' +
+            esc(f.fixture.date) +
+            '">' +
+            kickoff(f.fixture.date) +
+            (f.fixture.status.short === 'NS' ? '' : ' · ' + esc(f.fixture.status.short)) +
+            '</time></div><div class="teams"><div class="team">' +
+            crest(f.teams.home.name) +
+            teamName(f.teams.home.name) +
+            '</div><span class="visually-hidden">contre</span><div class="team">' +
+            crest(f.teams.away.name) +
+            teamName(f.teams.away.name) +
+            '</div></div><div class="matchfoot"><span class="tag ' +
+            (o ? (fresh(o.update) ? 'ok' : '') : 'muted') +
             '">' +
             (o ? (fresh(o.update) ? 'Cotes récentes' : 'Cotes anciennes') : 'Cotes non chargées') +
-            '</span><br><button class="btn light" data-match="' +
+            '</span><button class="btn secondary sm" data-match="' +
             f.fixture.id +
-            '">Analyse →</button></div></article>'
+            '" aria-label="Voir l’analyse : ' +
+            label +
+            '">Voir l’analyse <span aria-hidden="true">›</span></button></div></article>'
           );
         })
         .join('')
-    : '<div class="empty">Aucun match ne correspond aux filtres. Les cotes sont chargées progressivement : leur absence ici ne prouve pas leur absence chez le fournisseur.</div>';
+    : fixtures.length
+      ? '<div class="empty"><b>Aucun match ne correspond aux filtres.</b>Les cotes sont chargées progressivement : leur absence ici ne prouve pas leur absence chez le fournisseur.</div>'
+      : '<div class="empty"><b>Aucun match chargé pour cette date.</b>Si un message s’affiche au-dessus, le programme n’a pas pu être lu chez le fournisseur : ce vide ne signifie pas qu’aucun match n’est prévu.</div>';
   $('#more').classList.toggle('hidden', pageNum >= totalPages);
   $('#more').textContent = 'Charger davantage de cotes (' + pageNum + ' / ' + totalPages + ')';
 }
@@ -321,24 +380,34 @@ function recent(list, id) {
       };
     });
 }
+const RESULT_LABELS = {
+  W: ['V', 'Victoire'],
+  D: ['N', 'Nul'],
+  L: ['D', 'Défaite'],
+};
 function formHTML(a) {
   return a.length
-    ? a
-        .map(
-          (f) =>
-            '<div class="formrow"><i class="' +
-            f.result +
-            '">' +
-            f.result +
-            '</i><span>' +
-            esc(f.opponent) +
-            '</span><b style="margin-left:auto">' +
-            f.gf +
-            '–' +
-            f.ga +
-            '</b></div>',
-        )
-        .join('')
+    ? '<div class="formstrip" aria-hidden="true">' +
+        a.map((f) => '<span class="' + f.result + '"></span>').join('') +
+        '</div>' +
+        a
+          .map(
+            (f) =>
+              '<div class="formrow"><i class="' +
+              f.result +
+              '" aria-hidden="true">' +
+              RESULT_LABELS[f.result][0] +
+              '</i><span class="visually-hidden">' +
+              RESULT_LABELS[f.result][1] +
+              ' contre</span><span>' +
+              esc(f.opponent) +
+              '</span><b class="score">' +
+              f.gf +
+              '–' +
+              f.ga +
+              '</b></div>',
+          )
+          .join('')
     : '<p class="note">Historique indisponible</p>';
 }
 function poisson(l) {
@@ -394,16 +463,35 @@ async function detail(id, attempt = 0) {
     const a = recent(d.home, f.teams.home.id),
       b = recent(d.away, f.teams.away.id),
       m = model(a, b);
+    const bookCount = (d.odds[0]?.bookmakers || []).length;
     $('#details').innerHTML =
-      '<button class="btn light" id="back">← Le programme</button><p class="eyebrow" style="margin-top:25px">' +
+      '<button class="btn secondary" id="back">← Retour aux rencontres</button><div class="detailhead"><p class="eyebrow">' +
       esc(f.league.name) +
-      ' / ' +
-      stamp(f.fixture.date) +
-      '</p><h2 class="bigtitle">' +
-      esc(f.teams.home.name) +
-      '<br><span style="color:var(--orange)">vs ' +
-      esc(f.teams.away.name) +
-      '</span></h2><div class="notice">' +
+      ' · ' +
+      kickoff(f.fixture.date) +
+      '</p><h2 id="detailTitle" tabindex="-1"><span class="team">' +
+      crest(f.teams.home.name, 'lg') +
+      teamName(f.teams.home.name) +
+      '</span><span class="vs">contre</span><span class="team away">' +
+      crest(f.teams.away.name, 'lg') +
+      teamName(f.teams.away.name) +
+      '</span></h2><div class="datastatus"><span class="tag ' +
+      (a.length && b.length ? 'ok' : '') +
+      '">Forme récente · ' +
+      a.length +
+      ' et ' +
+      b.length +
+      ' matchs</span><span class="tag ' +
+      (d.injuries.length ? 'ok' : '') +
+      '">' +
+      d.injuries.length +
+      ' absence(s) signalée(s)</span>' +
+      (d.lineups.length ? '<span class="tag ok">Compositions publiées</span>' : '') +
+      '<span class="tag ' +
+      (bookCount ? 'ok' : '') +
+      '">' +
+      bookCount +
+      ' bookmaker(s)</span></div></div><p class="notice">' +
       (Object.keys(d.errors).length ? 'Certaines sources sont indisponibles. ' : '') +
       'Données consultées : ' +
       stamp(d.retrievedAt) +
@@ -411,25 +499,25 @@ async function detail(id, attempt = 0) {
       (d.lineups.length ? 'disponibles' : 'non disponibles') +
       '. ' +
       d.injuries.length +
-      ' absence(s) signalée(s) — une liste vide ne confirme pas un effectif complet.</div><div class="grid"><div class="panel"><h3>' +
+      ' absence(s) signalée(s) — une liste vide ne confirme pas un effectif complet.</p><div class="grid"><div class="card"><h3>' +
       esc(f.teams.home.name) +
       '</h3><p class="note">' +
       a.length +
       ' matchs terminés récents</p>' +
       formHTML(a) +
-      '</div><div class="panel"><h3>' +
+      '</div><div class="card"><h3>' +
       esc(f.teams.away.name) +
       '</h3><p class="note">' +
       b.length +
       ' matchs terminés récents</p>' +
       formHTML(b) +
-      '</div></div><div class="panel"><span class="eyebrow">Modèle exploratoire / Non validé</span>' +
+      '</div></div><div class="card"><p class="eyebrow">Modèle exploratoire · non validé</p>' +
       (m
-        ? '<div class="grid"><div><p>Plus de 2,5 buts</p><strong class="number">' +
+        ? '<div class="grid"><div><p>Plus de 2,5 buts</p><strong class="stat">' +
           Math.round(m.over * 100) +
           ' %</strong><div class="bar"><span style="width:' +
           m.over * 100 +
-          '%"></span></div></div><div><p>Les deux équipes marquent</p><strong class="number">' +
+          '%"></span></div></div><div><p>Les deux équipes marquent</p><strong class="stat">' +
           Math.round(m.btts * 100) +
           ' %</strong><div class="bar"><span style="width:' +
           m.btts * 100 +
@@ -439,7 +527,9 @@ async function detail(id, attempt = 0) {
           b.length +
           ' matchs terminés. Aucune correction de force des adversaires, domicile, blessures ou composition. Ces chiffres ne déclenchent aucune recommandation.</p>'
         : '<p class="note">Historique insuffisant : au moins huit matchs terminés par équipe sont nécessaires pour cette exploration.</p>') +
-      '</div><div class="panel"><h3>Absences & compositions</h3><p class="note">' +
+      '</div><div class="card"><h3>' +
+      (d.lineups.length ? 'Absences et compositions' : 'Absences') +
+      '</h3><p class="note">' +
       (d.injuries.length
         ? d.injuries.map((x) => esc(x.player?.name) + ' — ' + esc(x.player?.reason)).join('<br>')
         : 'Aucune absence retournée. À confirmer avec les communications officielles.') +
@@ -456,13 +546,15 @@ async function detail(id, attempt = 0) {
             '</p>',
         )
         .join('') +
-      '</div><div class="panel"><h3>Les marchés & leur prix</h3><p class="note">Seuil = 1 ÷ cote. Ce tableau ne calcule pas de valeur attendue pour les marchés non modélisés. L’ajout au coupon est une simulation choisie manuellement. Les règles de règlement du bookmaker restent à vérifier.</p><select id="book" aria-label="Bookmaker"></select><div id="marketTable" class="scroll"></div></div>';
+      '</div><div class="card"><h3>Les marchés et leur prix</h3><p class="note">Seuil = 1 ÷ cote. Ce tableau ne calcule pas de valeur attendue pour les marchés non modélisés. L’ajout au coupon est une simulation choisie manuellement. Les règles de règlement du bookmaker restent à vérifier.</p><div class="bookrow"><label for="book">Bookmaker</label><select id="book" aria-label="Bookmaker"></select></div><div id="marketTable" class="scroll"></div></div>';
     $('#back').onclick = () => {
       advanceGeneration();
       current = null;
       $('#details').classList.add('hidden');
       $('#program').classList.remove('hidden');
+      moveFocus($('#programTitle'));
     };
+    moveFocus($('#detailTitle'));
     const books = d.odds[0]?.bookmakers || [];
     $('#book').innerHTML = books.length
       ? books.map((x, i) => '<option value="' + i + '">' + esc(x.name) + '</option>').join('')
@@ -490,15 +582,17 @@ async function detail(id, attempt = 0) {
   } catch (e) {
     if (gen !== generation) return;
     $('#details').innerHTML =
-      '<button class="btn light" id="back">← Le programme</button><p id="detailError">' +
+      '<button class="btn secondary" id="back">← Retour aux rencontres</button><div class="empty detailerror" id="detailTitle" tabindex="-1"><b>Fiche indisponible.</b><p id="detailError">' +
       esc(e.message) +
-      '</p>';
+      '</p></div>';
     $('#back').onclick = () => {
       advanceGeneration();
       current = null;
       $('#details').classList.add('hidden');
       $('#program').classList.remove('hidden');
+      moveFocus($('#programTitle'));
     };
+    moveFocus($('#detailTitle'));
     if (e.retryable)
       scheduleRetry(e.retryAfter, gen, $('#detailError'), e.message, attempt, (next) =>
         detail(id, next),
@@ -537,7 +631,7 @@ function renderMarkets() {
     '<p class="note">Mise à jour du fournisseur : ' +
     stamp(updated) +
     (available ? '' : ' · Ajout bloqué : cote ancienne, horaire passé ou match déjà commencé.') +
-    '</p><table><thead><tr><th>Marché / sélection</th><th>Cote</th><th>Seuil</th><th></th></tr></thead><tbody>' +
+    '</p><table><thead><tr><th scope="col">Marché / sélection</th><th scope="col">Cote</th><th scope="col">Seuil</th><th scope="col"><span class="visually-hidden">Ajouter au coupon</span></th></tr></thead><tbody>' +
     marketChoices
       .map(
         (x, i) =>
@@ -545,12 +639,16 @@ function renderMarkets() {
           esc(x.market) +
           '<br><b>' +
           esc(x.selection) +
-          '</b></td><td>' +
+          '</b></td><td class="num">' +
           x.odd.toFixed(2) +
-          '</td><td>' +
+          '</td><td class="num">' +
           (100 / x.odd).toFixed(1) +
-          ' %</td><td><button class="btn light" data-add="' +
+          ' %</td><td><button class="btn secondary sm" data-add="' +
           i +
+          '" aria-label="Ajouter au coupon : ' +
+          esc(x.market) +
+          ', ' +
+          esc(x.selection) +
           '" ' +
           (!available ? 'disabled' : '') +
           '>+</button></td></tr>',
@@ -580,25 +678,40 @@ function renderCoupon() {
     ? coupon
         .map(
           (x, i) =>
-            '<div class="couponitem"><button data-remove="' +
-            i +
-            '" aria-label="Retirer la sélection">×</button><b>' +
+            '<div class="couponitem"><div><b class="matchname" title="' +
             esc(x.match) +
-            '</b><br>' +
+            '">' +
+            esc(x.match) +
+            '</b>' +
             esc(x.market) +
             ' · ' +
             esc(x.selection) +
-            '<br><b>' +
-            x.odd.toFixed(2) +
-            '</b> · ' +
+            '<br><span class="note">' +
             esc(x.bookmaker) +
-            '<br><span class="note">Cote du ' +
+            ' · cote du ' +
             stamp(x.updated) +
-            '</span></div>',
+            '</span></div><strong class="odd">' +
+            x.odd.toFixed(2) +
+            '</strong><button class="iconbtn" data-remove="' +
+            i +
+            '" aria-label="Retirer la sélection : ' +
+            esc(x.match) +
+            '">×</button></div>',
         )
         .join('')
-    : '<div class="empty" style="margin-top:15px">Aucune sélection.<br>Ouvre une fiche pour examiner les cotes.</div>';
+    : '<div class="empty">Aucune sélection.<br>Ouvrez une fiche de match pour examiner les cotes.</div>';
   $('#combined').textContent = coupon.length ? total.toFixed(2) : '—';
+  const intactCopy =
+    ticketCopy &&
+    coupon.length === ticketCopy.items.length &&
+    coupon.every((x, i) => x === ticketCopy.items[i]);
+  $('#couponProbability').textContent = !intactCopy
+    ? 'Coupon manuel : Footscope ne calcule pas sa probabilité, car la dépendance entre les matchs et la calibration restent à valider. Les cotes peuvent changer.'
+    : ticketCopy.probability !== null
+      ? 'Copie intacte du ticket du jour. Probabilité estimée par le serveur pour ces sélections au moment de l’analyse : ' +
+        (ticketCopy.probability * 100).toFixed(1) +
+        ' %, exploratoire et non calibrée. Si vous modifiez ce coupon, il devient manuel et aucune probabilité n’est calculée.'
+      : 'Copie intacte du ticket du jour : le serveur n’a pas fourni de probabilité pour ce ticket, et Footscope n’en calcule pas ici. Les cotes peuvent changer.';
   const stake = Number($('#stake').value);
   $('#return').textContent =
     coupon.length && Number.isFinite(stake) && stake >= 0
@@ -644,15 +757,23 @@ function renderJournal() {
     ? history
         .map(
           (x) =>
-            '<div class="couponitem"><b>' +
+            '<div class="journalitem"><div><b>' +
             stamp(x.createdAt) +
             '</b><p>' +
-            x.selections.map((s) => esc(s.match) + ' / ' + esc(s.selection)).join('<br>') +
-            '</p><span>Mise fictive ' +
+            x.selections.map((s) => esc(s.match) + ' · ' + esc(s.selection)).join('<br>') +
+            '</p><p>Mise fictive ' +
             x.stake +
             ' CAD · Cote ' +
             x.odd.toFixed(2) +
-            '</span><br><select data-result="' +
+            '</p><p class="note">' +
+            (x.result === 'won'
+              ? 'Bénéfice simulé : ' + (x.stake * (x.odd - 1)).toFixed(2) + ' CAD'
+              : x.result === 'lost'
+                ? 'Perte simulée : ' + x.stake + ' CAD'
+                : x.result === 'void'
+                  ? 'Mise fictive restituée'
+                  : 'Résultat non renseigné') +
+            '</p></div><select data-result="' +
             x.id +
             '" aria-label="Résultat manuel"><option value="pending" ' +
             (x.result === 'pending' ? 'selected' : '') +
@@ -662,15 +783,7 @@ function renderJournal() {
             (x.result === 'lost' ? 'selected' : '') +
             '>Perdu</option><option value="void" ' +
             (x.result === 'void' ? 'selected' : '') +
-            '>Entièrement annulé</option></select><p class="note">' +
-            (x.result === 'won'
-              ? 'Bénéfice simulé : ' + (x.stake * (x.odd - 1)).toFixed(2) + ' CAD'
-              : x.result === 'lost'
-                ? 'Perte simulée : ' + x.stake + ' CAD'
-                : x.result === 'void'
-                  ? 'Mise fictive restituée'
-                  : 'Résultat non renseigné') +
-            '</p></div>',
+            '>Entièrement annulé</option></select></div>',
         )
         .join('')
     : '<div class="empty">Aucune simulation enregistrée.</div>';
@@ -717,12 +830,19 @@ document.querySelectorAll('nav button').forEach(
     (b.onclick = () => {
       advanceGeneration();
       activeView = b.dataset.view;
-      document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('active', x === b));
+      document.querySelectorAll('nav button').forEach((x) => {
+        x.classList.toggle('active', x === b);
+        x.ariaCurrent = x === b ? 'page' : null;
+      });
       ['today', 'journal', 'method'].forEach((id) =>
         $('#' + id).classList.toggle('hidden', id !== b.dataset.view),
       );
     }),
 );
+$('#seeMethod').onclick = () => {
+  $('nav button[data-view="method"]').click();
+  moveFocus($('#methodTitle'));
+};
 
 async function assistantInit() {
   try {
@@ -786,7 +906,7 @@ function verdictLabel(v) {
 }
 function eventHTML(x) {
   return (
-    '<div class="couponitem"><b>' +
+    '<div class="eventitem"><b>' +
     esc(x.match) +
     '</b><br>' +
     esc(x.market) +
@@ -795,7 +915,7 @@ function eventHTML(x) {
     ' @ ' +
     Number(x.odd).toFixed(2) +
     '<br><span class="tag ' +
-    (x.status === 'simulation_eligible' ? '' : 'warn') +
+    (x.status === 'simulation_eligible' ? 'ok' : '') +
     '">' +
     verdictLabel(x.status) +
     '</span>' +
@@ -819,28 +939,74 @@ function eventHTML(x) {
     '</p></div>'
   );
 }
+function pickHTML(x) {
+  return (
+    '<li class="pick"><span class="crests">' +
+    String(x.match ?? '')
+      .split(' — ')
+      .map((team) => crest(team))
+      .join('') +
+    '</span><div><b class="matchname" title="' +
+    esc(x.match) +
+    '">' +
+    esc(x.match) +
+    '</b><span class="meta">' +
+    esc(x.market) +
+    ' · ' +
+    esc(x.selection) +
+    ' · ' +
+    kickoff(x.kickoff) +
+    '</span></div><span class="odd"><span class="visually-hidden">Cote </span>' +
+    Number(x.odd).toFixed(2) +
+    '</span></li>'
+  );
+}
+// Le ticket du jour : sélections, bookmaker, cote combinée et, si l'API la fournit,
+// la probabilité combinée (ticketProbability). Rien n'est recalculé ici.
 function showAssistant(d) {
   const box = $('#assistantResult');
   box.classList.remove('hidden');
+  const picks = d.selections || [],
+    reviews = d.reviews || [];
+  const notes = [
+    ...(d.reasons || []),
+    ...(d.risks || []),
+    ...(d.blockers || []),
+    ...(d.llmError ? ['LLM : ' + d.llmError.code + ' · ' + (d.llmError.message || '')] : []),
+  ];
   box.innerHTML =
-    '<span class="eyebrow">' +
-    (d.engine === 'llm' ? 'STATISTIQUES + EXPLICATION LLM' : 'MOTEUR STATISTIQUE') +
-    '</span><h3 style="margin-top:12px">' +
+    '<div class="verdict"><span class="tag ' +
+    (d.verdict === 'simulation_eligible' ? 'ok' : '') +
+    '">' +
     verdictLabel(d.verdict) +
-    '</h3><p>' +
+    '</span><span class="meta">' +
+    (!picks.length && reviews.length ? 'Examen de votre coupon · ' : '') +
+    (d.engine === 'llm' ? 'Statistiques + explication LLM' : 'Moteur statistique') +
+    '</span></div><p class="summary">' +
     esc(d.summary) +
-    '</p><p class="note">' +
-    [
-      ...(d.reasons || []),
-      ...(d.risks || []),
-      ...(d.blockers || []),
-      ...(d.llmError ? ['LLM : ' + d.llmError.code + ' · ' + (d.llmError.message || '')] : []),
-    ]
-      .map(esc)
-      .join('<br>') +
     '</p>' +
+    (picks.length
+      ? '<ol class="picks">' +
+        picks.map(pickHTML).join('') +
+        '</ol><dl class="ticketfacts"><div><dt>Bookmaker</dt><dd>' +
+        esc([...new Set(picks.map((x) => x.bookmaker))].join(', ')) +
+        '</dd></div>' +
+        (Number.isFinite(d.combinedOdds)
+          ? '<div><dt>Cote combinée</dt><dd>' + d.combinedOdds.toFixed(2) + '</dd></div>'
+          : '') +
+        (Number.isFinite(d.ticketProbability)
+          ? '<div><dt>Probabilité du ticket</dt><dd class="prob">' +
+            (d.ticketProbability * 100).toFixed(1) +
+            ' %<small>estimation prudente du serveur, non calibrée' +
+            (Number.isFinite(d.minTicketProbability)
+              ? ' · seuil ' + (d.minTicketProbability * 100).toFixed(0) + ' %'
+              : '') +
+            '</small></dd></div>'
+          : '') +
+        '</dl>'
+      : '') +
     (d.analyzed !== undefined
-      ? '<p class="note">' +
+      ? '<p class="note coverage">' +
         d.analyzed +
         ' match(s) examinés / ' +
         d.eligibleCount +
@@ -850,17 +1016,34 @@ function showAssistant(d) {
           : 'Couverture partielle : ne pas interpréter cette analyse comme exhaustive.') +
         ' Aucune validation pour argent réel.</p>'
       : '') +
-    (d.reviews || []).map(eventHTML).join('') +
-    (d.selections?.length
-      ? d.selections.map(eventHTML).join('') +
-        '<button id="useProposal" class="btn orange">Utiliser ces sélections en simulation</button>'
+    (notes.length || reviews.length || picks.length
+      ? '<details class="more"' +
+        (picks.length ? '' : ' open') +
+        '><summary>' +
+        (picks.length ? 'Voir le détail de l’analyse' : 'Motifs et réserves') +
+        '</summary>' +
+        (notes.length
+          ? '<ul class="reasons">' + notes.map((n) => '<li>' + esc(n) + '</li>').join('') + '</ul>'
+          : '') +
+        reviews.map(eventHTML).join('') +
+        picks.map(eventHTML).join('') +
+        '</details>'
+      : '') +
+    (picks.length
+      ? '<button id="useProposal" class="btn primary block">Copier dans mon coupon</button>'
       : '');
   if ($('#useProposal'))
     $('#useProposal').onclick = () => {
       if (coupon.length && !confirm('Remplacer le coupon actuel ?')) return;
       coupon = d.selections.slice(0, 4);
+      // Valeur fournie par le serveur, reprise telle quelle dans la note du coupon : elle
+      // reste visible même quand « Examiner mon coupon » remplace le ticket affiché.
+      ticketCopy = {
+        items: coupon.slice(),
+        probability: Number.isFinite(d.ticketProbability) ? d.ticketProbability : null,
+      };
       renderCoupon();
-      toast('Coupon de simulation ajouté.');
+      toast('Ticket du jour copié dans votre coupon.');
     };
 }
 let assistantBusy = false;
@@ -988,16 +1171,33 @@ $('#review').onclick = async () => {
 async function loadPerformance() {
   try {
     const p = await get('/api/performance');
-    $('#performance').textContent = p.available
-      ? p.recordedCoupons +
-        ' propositions conservées · ' +
-        p.settledSelections +
-        ' sélections réglées · Taux de réussite ' +
-        (p.winRate === null ? 'en attente' : (p.winRate * 100).toFixed(1) + ' %') +
-        ' · Rendement fictif ' +
-        (p.simulatedROI === null ? 'en attente' : (p.simulatedROI * 100).toFixed(1) + ' %') +
-        ' · Modèle non validé.'
-      : 'Suivi serveur indisponible.';
+    const pct = (v) => (v === null ? 'en attente' : (v * 100).toFixed(1) + ' %');
+    const interval = (v) =>
+      Array.isArray(v) && v.length === 2 && v.every(Number.isFinite)
+        ? '<small>IC 95 % : ' +
+          (v[0] * 100).toFixed(1) +
+          ' à ' +
+          (v[1] * 100).toFixed(1) +
+          ' %</small>'
+        : '';
+    if (p.available)
+      $('#performance').innerHTML =
+        '<div class="perfgrid"><div><strong>' +
+        esc(p.recordedCoupons) +
+        '</strong><span>propositions conservées</span></div><div><strong>' +
+        esc(p.settledSelections) +
+        '</strong><span>sélections réglées</span></div><div><strong>' +
+        pct(p.winRate) +
+        '</strong><span>taux de réussite</span>' +
+        interval(p.winRateCI) +
+        '</div><div><strong>' +
+        pct(p.simulatedROI) +
+        '</strong><span>rendement fictif</span>' +
+        interval(p.roiCI) +
+        '</div></div><p class="note">' +
+        (typeof p.sampleWarningText === 'string' ? esc(p.sampleWarningText) + ' ' : '') +
+        'Modèle non validé.</p>';
+    else $('#performance').textContent = 'Suivi serveur indisponible.';
   } catch {
     $('#performance').textContent = 'Suivi serveur temporairement indisponible.';
   }

@@ -4,7 +4,7 @@ import { json } from './http.js';
 import { assistant } from './assistant.js';
 import { performance } from './storage.js';
 import { exportEvidence, finishEvidence } from './jobs.js';
-import { page, css, clientScript } from '../../.build/web-assets.js';
+import { page, css, clientScript, fonts } from '../../.build/web-assets.js';
 
 export default {
   async fetch(req, env) {
@@ -138,6 +138,20 @@ export default {
             'X-Content-Type-Options': 'nosniff',
           },
         });
+      if (u.pathname.startsWith('/assets/fonts/')) {
+        const name = u.pathname.slice('/assets/fonts/'.length);
+        if (Object.hasOwn(fonts, name))
+          return new Response(
+            Uint8Array.from(atob(fonts[name]), (c) => c.charCodeAt(0)),
+            {
+              headers: {
+                'Content-Type': 'font/woff2',
+                'Cache-Control': 'public, max-age=86400',
+                'X-Content-Type-Options': 'nosniff',
+              },
+            },
+          );
+      }
       if (u.pathname === '/')
         return new Response(page, {
           headers: {
