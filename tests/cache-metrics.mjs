@@ -141,8 +141,12 @@ assert(requests.every((u) => !u.includes(secret)));
 const providerSource =
   fs
     .readFileSync('src/server/provider.js', 'utf8')
-    .replace('const API_SPACING_MS = 6500;', 'const API_SPACING_MS = 0;') +
-  '\nexport { fetchedPaths };';
+    .replace('const API_SPACING_MS = 6500;', 'const API_SPACING_MS = 0;')
+    // Une URL data n'a pas de base : l'import relatif de l'archive des cotes devient absolu.
+    .replace(
+      "'./odds-archive.js'",
+      JSON.stringify(import.meta.resolve('../src/server/odds-archive.js')),
+    ) + '\nexport { fetchedPaths };';
 const freshProvider = (tag) =>
   import(
     'data:text/javascript;base64,' + Buffer.from(providerSource).toString('base64') + '#' + tag

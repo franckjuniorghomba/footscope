@@ -1,3 +1,4 @@
+import { archiveOdds } from './odds-archive.js';
 const memory = new Map(),
   pending = new Map();
 let queue = Promise.resolve(),
@@ -212,6 +213,23 @@ export function providerBase(env) {
     throw Error('API_RELAY_TOKEN doit contenir au moins 32 caractères pour un relais.');
   return u.href.endsWith('/') ? u.href : u.href + '/';
 }
+// Contexte d'exécution du Worker, porté par `env` jusqu'à api() sans changer les signatures des
+// modules. Non énumérable : il n'apparaît dans aucune copie ni sérialisation de `env`.
+const EXECUTION_CONTEXT = Symbol('executionContext');
+export function withExecutionContext(env, ctx) {
+  if (!env || typeof ctx?.waitUntil !== 'function') return env;
+  return Object.create(env, { [EXECUTION_CONTEXT]: { value: ctx } });
+}
+// `waitUntil` garde le Worker en vie jusqu'à la fin de la tâche sans retarder la réponse.
+// Sans contexte (tests, Node), la promesse est détachée et ses erreurs absorbées.
+function inBackground(env, task) {
+  const ctx = env?.[EXECUTION_CONTEXT];
+  const settled = Promise.resolve(task).catch(() => {});
+  if (ctx)
+    try {
+      ctx.waitUntil(settled);
+    } catch {}
+}
 export async function api(env, path, ttl = 300000) {
   if (!env.API_FOOTBALL_KEY) throw Error('La connexion API reste à configurer.');
   const hit = memory.get(path);
@@ -290,6 +308,9 @@ export async function api(env, path, ttl = 300000) {
     if (path.startsWith('fixtures?date='))
       for (const f of d.response || [])
         memory.set('fixtures?id=' + f.fixture.id, { at: Date.now(), data: { response: [f] } });
+    // Réponse réellement reçue du fournisseur : seule entrée de l'archive des cotes (BIS-192).
+    // L'écriture ne retarde jamais la réponse : elle continue en arrière-plan.
+    inBackground(env, archiveOdds(env, path, result));
     return result;
   })();
   pending.set(path, job);

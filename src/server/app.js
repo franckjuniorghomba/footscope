@@ -1,4 +1,5 @@
-import { api, cacheMetrics, fixturesForDay } from './provider.js';
+import { api, cacheMetrics, fixturesForDay, withExecutionContext } from './provider.js';
+import { archiveMetrics } from './odds-archive.js';
 import { POLICY } from './policy.js';
 import { json } from './http.js';
 import { assistant } from './assistant.js';
@@ -7,7 +8,9 @@ import { exportEvidence, finishEvidence } from './jobs.js';
 import { page, css, clientScript, fonts } from '../../.build/web-assets.js';
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
+    // Le contexte suit `env` jusqu'à api() : les écritures d'archive passent par `waitUntil`.
+    env = withExecutionContext(env, ctx);
     const u = new URL(req.url);
     if (
       req.method !== 'GET' &&
@@ -22,7 +25,11 @@ export default {
       }
       if (u.pathname === '/api/diagnostics') {
         const obj = env.BUCKET ? await env.BUCKET.get('api-control/last-limit.json') : null;
-        return json({ lastLimit: obj ? await obj.json() : null, cache: cacheMetrics() });
+        return json({
+          lastLimit: obj ? await obj.json() : null,
+          cache: cacheMetrics(),
+          oddsArchive: archiveMetrics(),
+        });
       }
       if (u.pathname === '/api/performance') return json(await performance(env));
       if (u.pathname === '/api/assistant/latest') {
