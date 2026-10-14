@@ -89,6 +89,18 @@ try {
     (await readJson(join(root, 'legacy', 'dataset-checksum.json'))).planHash,
     BIS167_PLAN_HASH,
   );
+  // Forme documentée du rapport par défaut : seul `coverage.afterTestEnd` est ajouté,
+  // vide quand aucune rencontre n'est datée de testEnd ou après (cas du jeu BIS-167).
+  const legacyReport = runBacktest(legacyDataset);
+  assert.deepEqual(Object.keys(legacyReport.coverage), [
+    'input',
+    'completed',
+    'byLeagueSeason',
+    'exclusions',
+    'afterTestEnd',
+  ]);
+  assert.deepEqual(legacyReport.coverage.afterTestEnd, { count: 0, byStatus: {} });
+  assert.equal(legacyReport.sources, undefined);
   calls = 0;
 
   // Procédure de l'humain : registre partagé plein (30/30), archivage, puis --used 20.
