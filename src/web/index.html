@@ -13,6 +13,12 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23050c15'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%2398fa5f' stroke-width='2.5'/%3E%3Cpath d='M16 3v6M16 23v6M3 16h6M23 16h6' stroke='%2398fa5f' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E"
     />
     <title>Footscope — Comprendre le match</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Outfit:wght@700;800&display=swap"
+    />
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
   <body>
@@ -29,7 +35,7 @@
         <button data-view="today" class="active" aria-current="page">Analyses</button
         ><button data-view="method">Méthode</button><button data-view="journal">Historique</button>
       </nav>
-      <span class="pill"
+      <span class="pill" id="connectionPill"
         ><span class="dot" aria-hidden="true"></span
         ><span id="connection">Connexion en cours</span></span
       >
@@ -99,7 +105,8 @@
           </div>
           <div class="fact"><strong>4</strong><span>sélections maximum</span></div>
           <div class="fact">
-            <strong id="quota">—</strong><span>requêtes autorisées par jour</span>
+            <strong id="quota">—</strong><span>requêtes API-Football par jour</span
+            ><span class="factnote hidden" id="providerPlan"></span>
           </div>
         </section>
         <section id="rencontres" class="rencontres" aria-labelledby="programTitle">
@@ -162,7 +169,7 @@
                 <span class="chip" id="slots">0 / 4</span>
               </div>
               <div class="couponbody">
-                <p class="eyebrow">Simulation uniquement</p>
+                <p class="eyebrow">Composé par vous · simulation uniquement</p>
                 <div id="couponItems"></div>
                 <div class="total"><span>Cote combinée</span><strong id="combined">—</strong></div>
                 <label class="fieldlabel" for="stake">Mise fictive (CAD)</label
@@ -170,9 +177,9 @@
                 <div class="total">
                   <span>Retour potentiel, mise incluse</span><b id="return">—</b>
                 </div>
-                <p class="note">
-                  La probabilité du combiné n’est pas calculée : les dépendances et la calibration
-                  restent à valider. Les cotes peuvent changer.
+                <p class="note" id="couponProbability">
+                  Coupon manuel : Footscope ne calcule pas sa probabilité, car la dépendance entre
+                  les matchs et la calibration restent à valider. Les cotes peuvent changer.
                 </p>
                 <button class="btn secondary block" id="review">Examiner mon coupon</button>
                 <div id="couponReview" class="note" role="status"></div>

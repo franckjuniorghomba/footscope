@@ -17,9 +17,10 @@
   --data-away: #4f96e8;
   --data-neutral: #dee0e3;
   --data-empty: #54616f;
-  /* Typographie : Outfit et Barlow si disponibles, sinon police système */
-  --font-display: 'Outfit', 'Gilroy', system-ui, sans-serif;
-  --font-sans: 'Barlow', system-ui, sans-serif;
+  /* Typographie : Outfit et Barlow (Google Fonts, chargées dans index.html avec
+     display=swap), sinon police système */
+  --font-display: 'Outfit', 'Gilroy', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --display-xl: 800 56px/62px var(--font-display);
   --heading-lg: 800 38px/44px var(--font-display);
   --heading-md: 800 28px/34px var(--font-display);
@@ -305,6 +306,9 @@ nav button.active::after {
   border-radius: var(--radius-pill);
   background: var(--pitch);
 }
+.pill.off .dot {
+  background: var(--data-empty);
+}
 
 main {
   max-width: var(--page-max);
@@ -438,10 +442,8 @@ main {
   border-bottom: 1px solid var(--line);
 }
 .pick b {
-  display: block;
   font: var(--label);
   color: var(--ink);
-  overflow-wrap: anywhere;
 }
 .pick .meta {
   display: block;
@@ -594,6 +596,13 @@ details.more > :not(summary) {
   font: var(--small);
   color: var(--ink-subtle);
 }
+/* Plan du fournisseur, sous le quota qu'il fixe. */
+.fact .factnote {
+  display: block;
+  margin-top: var(--space-1);
+  font: var(--caption);
+  color: var(--ink-muted);
+}
 
 /* Prochaines rencontres */
 .sectionhead {
@@ -722,6 +731,19 @@ input[type='checkbox'] {
   overflow-wrap: break-word;
   min-width: 0;
 }
+/* Noms d'équipe et de match : un mot trop long se coupe, et au-delà de deux lignes le nom
+   s'abrège ; le nom complet reste dans l'attribut title et dans le texte lu par les lecteurs
+   d'écran. */
+.teamname,
+.matchname {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
 .matchfoot {
   display: flex;
   flex-wrap: wrap;
@@ -839,10 +861,8 @@ input[type='checkbox'] {
   color: var(--ink-muted);
 }
 .couponitem b {
-  display: block;
   color: var(--ink);
   font-weight: 600;
-  overflow-wrap: anywhere;
 }
 .couponitem .odd {
   font: var(--stat);
@@ -917,6 +937,13 @@ input[type='checkbox'] {
 .detailhead h2 .team {
   font: inherit;
 }
+/* Dans la fiche, le nom complet s'affiche toujours : il se coupe sans s'abréger. */
+.detailhead h2 .teamname {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: none;
+  line-clamp: none;
+}
 .detailhead h2 .team.away {
   flex-direction: row-reverse;
   text-align: right;
@@ -943,6 +970,8 @@ input[type='checkbox'] {
 .card h3 {
   margin-bottom: var(--space-3);
   font: var(--heading-sm);
+  /* Les titres de forme récente portent le nom de l'équipe : un mot long se coupe. */
+  overflow-wrap: anywhere;
 }
 .card > p + p {
   margin-top: var(--space-3);
@@ -988,6 +1017,10 @@ input[type='checkbox'] {
   font: var(--small);
   color: var(--ink-muted);
 }
+.formrow > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .formrow i {
   display: inline-grid;
   place-items: center;
@@ -1011,7 +1044,9 @@ input[type='checkbox'] {
   color: var(--ink);
 }
 .formrow .score {
+  flex: none;
   margin-left: auto;
+  white-space: nowrap;
   font: var(--stat);
   color: var(--ink);
 }
@@ -1089,6 +1124,7 @@ td:last-child {
 }
 .eventitem b {
   color: var(--ink);
+  overflow-wrap: anywhere;
 }
 .eventitem .tag {
   margin: var(--space-1) 0;
@@ -1156,6 +1192,7 @@ td:last-child {
 }
 .journalitem p {
   margin-top: var(--space-1);
+  overflow-wrap: anywhere;
 }
 .journalitem select {
   align-self: start;

@@ -17,6 +17,9 @@ $('#date').value = today;
 let fixtures = [],
   odds = new Map(),
   coupon = [],
+  // Dernière copie du ticket du jour dans le coupon : sert seulement à choisir la note du
+  // coupon (copie intacte ou coupon manuel). Aucune probabilité n'est calculée ici.
+  ticketCopy = null,
   history = [],
   pageNum = 0,
   totalPages = 0,
@@ -74,6 +77,10 @@ function initials(name) {
 }
 function crest(name, size = '') {
   return '<span class="crest ' + size + '" aria-hidden="true">' + esc(initials(name)) + '</span>';
+}
+// Nom d'équipe : coupé sur deux lignes au plus, puis abrégé ; le nom complet reste en title.
+function teamName(name) {
+  return '<span class="teamname" title="' + esc(name) + '">' + esc(name) + '</span>';
 }
 function moveFocus(el) {
   if (el?.focus) el.focus();
@@ -147,11 +154,21 @@ function scheduleRetry(seconds, gen, target, label, attempt, action) {
 async function init() {
   try {
     const d = await get('/api/status');
-    $('#connection').textContent =
-      (d.subscription?.plan || 'API') + ' · ' + (d.subscription?.active ? 'actif' : 'inactif');
+    const active = !!d.subscription?.active;
+    // subscription décrit l'abonnement au fournisseur API-Football, pas une offre Footscope :
+    // il est affiché à côté du quota qu'il fixe, jamais comme un statut de l'utilisateur.
+    $('#connection').textContent = active ? 'API-Football connecté' : 'API-Football inactif';
+    $('#connectionPill').classList.toggle('off', !active);
     $('#quota').textContent = (d.requests?.limit_day || '—').toLocaleString('fr-CA');
+    $('#providerPlan').textContent =
+      'API-Football · plan ' +
+      (d.subscription?.plan || 'inconnu') +
+      ' · ' +
+      (active ? 'actif' : 'inactif');
+    $('#providerPlan').classList.remove('hidden');
   } catch (e) {
     $('#connection').textContent = 'Connexion à vérifier';
+    $('#connectionPill').classList.add('off');
   }
   await load();
 }
@@ -262,10 +279,10 @@ function render() {
             (f.fixture.status.short === 'NS' ? '' : ' · ' + esc(f.fixture.status.short)) +
             '</time></div><div class="teams"><div class="team">' +
             crest(f.teams.home.name) +
-            esc(f.teams.home.name) +
+            teamName(f.teams.home.name) +
             '</div><span class="visually-hidden">contre</span><div class="team">' +
             crest(f.teams.away.name) +
-            esc(f.teams.away.name) +
+            teamName(f.teams.away.name) +
             '</div></div><div class="matchfoot"><span class="tag ' +
             (o ? (fresh(o.update) ? 'ok' : '') : 'muted') +
             '">' +
@@ -454,10 +471,10 @@ async function detail(id, attempt = 0) {
       kickoff(f.fixture.date) +
       '</p><h2 id="detailTitle" tabindex="-1"><span class="team">' +
       crest(f.teams.home.name, 'lg') +
-      esc(f.teams.home.name) +
+      teamName(f.teams.home.name) +
       '</span><span class="vs">contre</span><span class="team away">' +
       crest(f.teams.away.name, 'lg') +
-      esc(f.teams.away.name) +
+      teamName(f.teams.away.name) +
       '</span></h2><div class="datastatus"><span class="tag ' +
       (a.length && b.length ? 'ok' : '') +
       '">Forme récente · ' +
@@ -661,7 +678,9 @@ function renderCoupon() {
     ? coupon
         .map(
           (x, i) =>
-            '<div class="couponitem"><div><b>' +
+            '<div class="couponitem"><div><b class="matchname" title="' +
+            esc(x.match) +
+            '">' +
             esc(x.match) +
             '</b>' +
             esc(x.market) +
@@ -682,6 +701,15 @@ function renderCoupon() {
         .join('')
     : '<div class="empty">Aucune sélection.<br>Ouvrez une fiche de match pour examiner les cotes.</div>';
   $('#combined').textContent = coupon.length ? total.toFixed(2) : '—';
+  const intactCopy =
+    ticketCopy &&
+    coupon.length === ticketCopy.items.length &&
+    coupon.every((x, i) => x === ticketCopy.items[i]);
+  $('#couponProbability').textContent = !intactCopy
+    ? 'Coupon manuel : Footscope ne calcule pas sa probabilité, car la dépendance entre les matchs et la calibration restent à valider. Les cotes peuvent changer.'
+    : ticketCopy.probability
+      ? 'Copie intacte du ticket du jour : sa probabilité, estimée par le serveur pour ces sélections au moment de l’analyse, reste affichée dans le ticket. Elle est exploratoire et non calibrée. Si vous modifiez ce coupon, il devient manuel et aucune probabilité n’est calculée.'
+      : 'Copie intacte du ticket du jour : le serveur n’a pas fourni de probabilité pour ce ticket, et Footscope n’en calcule pas ici. Les cotes peuvent changer.';
   const stake = Number($('#stake').value);
   $('#return').textContent =
     coupon.length && Number.isFinite(stake) && stake >= 0
@@ -916,7 +944,9 @@ function pickHTML(x) {
       .split(' — ')
       .map((team) => crest(team))
       .join('') +
-    '</span><div><b>' +
+    '</span><div><b class="matchname" title="' +
+    esc(x.match) +
+    '">' +
     esc(x.match) +
     '</b><span class="meta">' +
     esc(x.market) +
@@ -963,9 +993,13 @@ function showAssistant(d) {
           ? '<div><dt>Cote combinée</dt><dd>' + d.combinedOdds.toFixed(2) + '</dd></div>'
           : '') +
         (Number.isFinite(d.ticketProbability)
-          ? '<div><dt>Probabilité combinée</dt><dd class="prob">' +
+          ? '<div><dt>Probabilité du ticket</dt><dd class="prob">' +
             (d.ticketProbability * 100).toFixed(1) +
-            ' %<small>estimation prudente</small></dd></div>'
+            ' %<small>estimation prudente du serveur, non calibrée' +
+            (Number.isFinite(d.minTicketProbability)
+              ? ' · seuil ' + (d.minTicketProbability * 100).toFixed(0) + ' %'
+              : '') +
+            '</small></dd></div>'
           : '') +
         '</dl>'
       : '') +
@@ -994,14 +1028,15 @@ function showAssistant(d) {
         '</details>'
       : '') +
     (picks.length
-      ? '<button id="useProposal" class="btn primary block">Utiliser ces sélections en simulation</button>'
+      ? '<button id="useProposal" class="btn primary block">Copier dans mon coupon</button>'
       : '');
   if ($('#useProposal'))
     $('#useProposal').onclick = () => {
       if (coupon.length && !confirm('Remplacer le coupon actuel ?')) return;
       coupon = d.selections.slice(0, 4);
+      ticketCopy = { items: coupon.slice(), probability: Number.isFinite(d.ticketProbability) };
       renderCoupon();
-      toast('Coupon de simulation ajouté.');
+      toast('Ticket du jour copié dans votre coupon.');
     };
 }
 let assistantBusy = false;
