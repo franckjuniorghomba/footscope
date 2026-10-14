@@ -10,8 +10,13 @@ export const fixedDay = (date) =>
 export const dayStart = (day) => Date.parse(day + 'T05:00:00Z');
 export const readJson = async (path) => JSON.parse(await readFile(path, 'utf8'));
 export const defaultPlan = await readJson(new URL('./plan.json', import.meta.url));
+// BIS-185 : fin de période fixée par la collecte (journée GMT−5 de sa première tentative, exclue).
+export const COLLECTION_DAY = 'collection-day';
+const hex64 = (v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
 
-export function validatePlan(plan) {
+// Un plan ouvert (testEnd = COLLECTION_DAY) n'est accepté que par le collecteur ;
+// le runner le résout avec la date écrite dans le jeu avant tout calcul.
+export function validatePlan(plan, { openEnd = false } = {}) {
   const date = (v) =>
     typeof v === 'string' &&
     /^\d{4}-\d{2}-\d{2}$/.test(v) &&
@@ -27,8 +32,13 @@ export function validatePlan(plan) {
     [plan.leagues, plan.seasons].some(
       (xs) => new Set(xs).size !== xs.length || xs.some((x) => !Number.isSafeInteger(x) || x <= 0),
     ) ||
-    ![plan.developmentStart, plan.testStart, plan.testEnd].every(date) ||
-    !(plan.developmentStart < plan.testStart && plan.testStart < plan.testEnd) ||
+    ![plan.developmentStart, plan.testStart].every(date) ||
+    !(plan.developmentStart < plan.testStart) ||
+    (plan.testEnd === COLLECTION_DAY
+      ? !openEnd || !plan.history
+      : !date(plan.testEnd) || !(plan.testStart < plan.testEnd)) ||
+    (plan.history !== undefined &&
+      (!hex64(plan.history?.sha256) || !hex64(plan.history.planHash))) ||
     !Number.isInteger(plan.bootstrapReplicates) ||
     plan.bootstrapReplicates < 100 ||
     plan.bootstrapReplicates > 10000 ||
@@ -74,6 +84,69 @@ export function validateDataset(data) {
     ids.add(f.fixture.id);
   }
   return data;
+}
+
+export async function loadPlan(path) {
+  let plan;
+  try {
+    plan = await readJson(path);
+  } catch {
+    throw Error('Plan illisible : indiquer un fichier JSON de scripts/backtest.');
+  }
+  return validatePlan(plan, { openEnd: true });
+}
+
+// Période test neuve : l'historique épinglé par le plan apprend, le jeu neuf est évalué.
+// Les sommes sont vérifiées par l'appelant ; ici, cohérence des périmètres et des rencontres.
+export function combineDatasets({ history, historySha256, current, currentSha256 }) {
+  const plan = current.plan;
+  validatePlan(plan, { openEnd: true });
+  validatePlan(history.plan);
+  validateDataset(history);
+  validateDataset(current);
+  if (plan.testEnd !== COLLECTION_DAY || !plan.history)
+    throw Error('Combinaison réservée à un plan à période neuve.');
+  if (
+    historySha256 !== plan.history.sha256 ||
+    sha256(JSON.stringify(history.plan)) !== plan.history.planHash
+  )
+    throw Error('Historique différent de celui épinglé par le plan : mélange refusé.');
+  if (history.kind !== current.kind) throw Error('Jeux de natures différentes : mélange refusé.');
+  const sorted = (xs) => JSON.stringify([...xs].sort((x, y) => x - y));
+  if (sorted(history.plan.leagues) !== sorted(plan.leagues))
+    throw Error('Ligues différentes entre historique et période neuve.');
+  if (Math.max(...history.plan.seasons) >= Math.min(...plan.seasons))
+    throw Error('Saisons chevauchantes entre historique et période neuve.');
+  if (history.fixtures.some((f) => fixedDay(f.fixture.date) >= plan.testStart))
+    throw Error('Historique empiétant sur la période neuve : mélange refusé.');
+  const collectedAt = current.collection?.collectedAt,
+    testEnd = current.collection?.testEnd;
+  if (
+    typeof collectedAt !== 'string' ||
+    !Number.isFinite(Date.parse(collectedAt)) ||
+    fixedDay(collectedAt) !== testEnd ||
+    !(plan.testStart < testEnd)
+  )
+    throw Error('Date de collecte absente, incohérente ou antérieure à la période neuve.');
+  const ids = new Set(history.fixtures.map((f) => f.fixture.id));
+  if (current.fixtures.some((f) => ids.has(f.fixture.id)))
+    throw Error('Rencontre présente dans les deux jeux : mélange refusé.');
+  const { history: pinned, ...rest } = plan;
+  return validateDataset({
+    schemaVersion: 1,
+    kind: current.kind,
+    source: current.source,
+    plan: {
+      ...rest,
+      seasons: [...history.plan.seasons, ...plan.seasons],
+      testEnd,
+    },
+    sources: {
+      history: { sha256: historySha256, planHash: pinned.planHash },
+      current: { sha256: currentSha256, planHash: sha256(JSON.stringify(plan)), collectedAt },
+    },
+    fixtures: [...history.fixtures, ...current.fixtures],
+  });
 }
 
 export function normalizeFixture(f) {

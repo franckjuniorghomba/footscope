@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "seasons": [2026],
+  "leagues": [39, 179, 78, 135, 140, 61, 88, 144, 94, 203],
+  "developmentStart": "2025-07-01",
+  "testStart": "2026-07-01",
+  "testEnd": "collection-day",
+  "history": {
+    "sha256": "7101245773e9037bf0ec86b348f542d729eb572d841e2a554fc49851e8257f8c",
+    "planHash": "f41afaad2da70ae9c02ce129dfc2647ee4f7f6285e402a41133655d01f5c015f"
+  },
+  "bootstrapReplicates": 2000,
+  "seed": 185
+}

@@ -3,11 +3,14 @@ import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { MAX_CALLS, withBudget } from './budget.mjs';
 import {
+  COLLECTION_DAY,
   atomicJson,
   cliArgs,
   defaultPlan,
   externalDirectory,
+  fixedDay,
   isMain,
+  loadPlan,
   normalizeFixture,
   readJson,
   sha256,
@@ -27,7 +30,7 @@ export async function collect({
   wait = sleep,
   now = Date.now,
 }) {
-  validatePlan(plan);
+  validatePlan(plan, { openEnd: true });
   out = await externalDirectory(out);
   return withBudget({ budgetFile, out }, async ({ budget, canReserve, reserve }) => {
     const lockPath = join(out, 'collect.lock');
@@ -170,12 +173,24 @@ export async function collect({
           await atomicJson(journalPath, journal);
           fixtures.push(...normalized);
         }
+      const collection = { calls: journal.attempts.length, files: journal.files };
+      // Plan ouvert seulement : le plan figé par défaut garde exactement le même jeu et la même somme.
+      // Première tentative du journal : les journées antérieures sont complètes dans chaque fichier.
+      let statuses;
+      if (plan.testEnd === COLLECTION_DAY) {
+        collection.collectedAt = journal.attempts.map((a) => a.at).sort()[0];
+        collection.testEnd = fixedDay(collection.collectedAt);
+        statuses = {};
+        for (const f of fixtures)
+          statuses[f.fixture.status.short] = (statuses[f.fixture.status.short] || 0) + 1;
+        collection.statuses = statuses;
+      }
       const dataset = validateDataset({
         schemaVersion: 1,
         kind: 'historical',
         source: 'API-Football',
         plan,
-        collection: { calls: journal.attempts.length, files: journal.files },
+        collection,
         fixtures,
       });
       const path = join(out, 'dataset.json');
@@ -186,7 +201,13 @@ export async function collect({
         sha256: checksum,
         planHash,
       });
-      return { path, calls: journal.attempts.length, fixtures: fixtures.length, sha256: checksum };
+      return {
+        path,
+        calls: journal.attempts.length,
+        fixtures: fixtures.length,
+        sha256: checksum,
+        ...(statuses && { testEnd: collection.testEnd, statuses }),
+      };
     } finally {
       await lock.close();
       await unlink(lockPath);
@@ -196,9 +217,13 @@ export async function collect({
 
 if (isMain(import.meta.url)) {
   try {
-    const args = cliArgs(process.argv.slice(2), ['--out']);
+    const args = cliArgs(process.argv.slice(2), ['--out', '--plan']);
     if (!args['--out']) throw Error('Argument --out requis (dossier hors dépôt).');
-    const result = await collect({ out: args['--out'], key: process.env.API_FOOTBALL_KEY });
+    const result = await collect({
+      out: args['--out'],
+      key: process.env.API_FOOTBALL_KEY,
+      ...(args['--plan'] && { plan: await loadPlan(args['--plan']) }),
+    });
     console.log(JSON.stringify(result));
   } catch (error) {
     console.error(error.message);

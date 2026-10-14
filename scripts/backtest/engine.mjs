@@ -57,10 +57,17 @@ export function runBacktest(dataset, plan = dataset.plan || defaultPlan) {
   const fixtures = [...dataset.fixtures].sort(
     (a, b) => a.fixture.timestamp - b.fixture.timestamp || a.fixture.id - b.fixture.id,
   );
-  const batches = new Map();
+  const batches = new Map(),
+    afterTestEnd = { count: 0, byStatus: {} };
   for (const f of fixtures) {
     const day = fixedDay(f.fixture.date);
-    if (day >= plan.testEnd) continue;
+    // Ni évaluées ni apprises : matchs à venir d'une saison en cours, ou postérieurs au plan.
+    if (day >= plan.testEnd) {
+      afterTestEnd.count++;
+      const status = f.fixture.status.short;
+      afterTestEnd.byStatus[status] = (afterTestEnd.byStatus[status] || 0) + 1;
+      continue;
+    }
     if (!batches.has(day)) batches.set(day, []);
     batches.get(day).push(f);
   }
@@ -75,6 +82,7 @@ export function runBacktest(dataset, plan = dataset.plan || defaultPlan) {
     completed: fixtures.filter((f) => f.fixture.status.short === 'FT').length,
     byLeagueSeason: {},
     exclusions: {},
+    afterTestEnd,
   };
   for (const f of fixtures) {
     const key = `${f.league.id}-${f.league.season}`;
