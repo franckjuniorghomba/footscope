@@ -552,11 +552,14 @@ assert(html.includes('Valeur face au marché +1,4 %'), 'Badge vert du candidat
 assert(html.includes('Sous la cote juste −8,3 %'), 'Badge gris du candidat 22');
 assert(html.includes('Valeur face au marché : —'), 'Candidat 23 sans repère');
 
-// Examen : la sélection absente du fournisseur garde son badge « — » et sa raison.
+// Examen : la sélection absente du fournisseur garde son badge « — » ; sa raison
+// n'apparaît qu'une fois, dans les raisons générales de la sélection.
 html = render(reviewed);
 assert.equal(count(html, /class="valuebadge"/g), 2, 'Un badge par sélection examinée');
 assert(html.includes('Valeur face au marché : —'));
-assert(html.includes(MARKET_VALUE_REASONS.EVENT_MISSING));
+assert.equal(count(html, /Événement absent de la réponse/g), 1, 'Raison affichée une seule fois');
+assert(html.includes('Événement absent de la réponse actuelle du fournisseur.'));
+assert(!html.includes(MARKET_VALUE_REASONS.EVENT_MISSING), 'Pas de doublon sous le badge');
 assert(!html.includes('Candidats écartés'));
 // Le check manquant n'a repris aucune donnée du client (cote 50 non comparée).
 assert.equal(reviewed.market.checks[1].index, 1);
@@ -589,5 +592,5 @@ html = render({
 });
 assert(html.includes('Sous la cote juste\u00a0−&lt;0,1\u00a0%'));
 console.log(
-  'Passed: valeur face au marché 29/14 (+1,38 %), tous les candidats comparés et rendus (7 > 5, sans repère, sans ticket), badge « — » d’une sélection absente, « À la cote juste », plus/moins et BTTS à 2 issues (1e-9), double chance par 1X2 juste, refus null (absent, périmé, autre match, incomplet, hors bet365, client), ticket/verdicts/LLM inchangés, sentinelle absente.',
+  'Passed: valeur face au marché 29/14 (+1,38 %), tous les candidats comparés et rendus (7 > 5, sans repère, sans ticket), badge « — » d’une sélection absente (raison non dupliquée), « À la cote juste », plus/moins et BTTS à 2 issues (1e-9), double chance par 1X2 juste, refus null (absent, périmé, autre match, incomplet, hors bet365, client), ticket/verdicts/LLM inchangés, sentinelle absente.',
 );

@@ -929,11 +929,15 @@ const signedPercent = (v) =>
   '\u00a0%';
 function valueBadge(check) {
   if (!check) return '';
+  // Sélection absente du fournisseur : sa raison figure déjà dans les raisons générales
+  // de la sélection ; le badge ne la répète pas.
   if (!Number.isFinite(check.marketValue))
     return (
-      '<span class="valuebadge"><span class="tag muted">Valeur face au marché : —</span><small>' +
-      esc(check.reason || 'Pas de repère Pinnacle.') +
-      '</small></span>'
+      '<span class="valuebadge"><span class="tag muted">Valeur face au marché : —</span>' +
+      (check.reasonCode === 'EVENT_MISSING'
+        ? ''
+        : '<small>' + esc(check.reason || 'Pas de repère Pinnacle.') + '</small>') +
+      '</span>'
     );
   const fair =
     'cote juste Pinnacle\u00a0' +
