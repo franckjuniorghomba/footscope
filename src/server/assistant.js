@@ -3,7 +3,7 @@ import { POLICY } from './policy.js';
 import { json } from './http.js';
 import { putJob, universeJob } from './jobs.js';
 import { scan } from './evidence.js';
-import { selectCoupon } from './coupon.js';
+import { BELOW_THRESHOLD_REASON, selectCouponDetailed } from './coupon.js';
 import { llmExplanation } from './llm.js';
 import { settle } from './storage.js';
 
@@ -180,7 +180,8 @@ export async function assistant(req, env, path) {
     return json({ error: 'Analyse en double.' }, 400);
   let selections = [],
     reviews = [],
-    blockers = [];
+    blockers = [],
+    ticket = null;
   const scope = preparedJob?.scope || body.scope || {};
   if (proposing) {
     const allowed = reports.filter(
@@ -212,7 +213,8 @@ export async function assistant(req, env, path) {
               'Aucune cote exploitable.'),
         );
     }
-    selections = selectCoupon(allowed);
+    ticket = selectCouponDetailed(allowed);
+    selections = ticket.selections;
   } else {
     if (!Array.isArray(body.selections) || body.selections.length < 1 || body.selections.length > 4)
       return json({ error: 'Une à quatre sélections requises.' }, 400);
@@ -274,6 +276,12 @@ export async function assistant(req, env, path) {
     generatedAt: new Date().toISOString(),
     combinedOdds: selections.length ? selections.reduce((p, x) => p * x.odd, 1) : null,
     combinedProbability: null,
+    // Métadonnées du ticket calculées par le serveur (null hors proposition) : le LLM les
+    // explique sans les recalculer, et le motif d'absence remplace un message générique.
+    ticketProbability: ticket?.ticketProbability ?? null,
+    ticketProbabilityExploratory: ticket?.ticketProbabilityExploratory ?? null,
+    minTicketProbability: POLICY.minTicketProbability,
+    noTicketReason: ticket?.noTicketReason ?? null,
     risks: [
       'Modèle non validé hors échantillon.',
       'Le scénario prudent n’est pas un intervalle de confiance.',
@@ -293,8 +301,13 @@ export async function assistant(req, env, path) {
   let explanation;
   try {
     explanation =
-      !selections.length && !reviews.length
-        ? { engine: 'statistics', summary: 'Aucun coupon : aucun événement ne passe les filtres.' }
+      // Sous le seuil, des candidats existaient : le LLM explique pourquoi aucun ticket.
+      !selections.length && !reviews.length && result.noTicketReason !== BELOW_THRESHOLD_REASON
+        ? {
+            engine: 'statistics',
+            summary:
+              result.noTicketReason || 'Aucun coupon : aucun événement ne passe les filtres.',
+          }
         : await llmExplanation(env, result);
   } catch {
     explanation = {
@@ -302,6 +315,9 @@ export async function assistant(req, env, path) {
       summary: 'Filtres appliqués ; explication LLM indisponible.',
     };
   }
+  // Sans explication du LLM, le motif d'absence calculé par le serveur reste le résumé.
+  if (result.noTicketReason && explanation.engine !== 'llm')
+    explanation = { ...explanation, summary: result.noTicketReason };
   const final = {
     ...result,
     ...explanation,

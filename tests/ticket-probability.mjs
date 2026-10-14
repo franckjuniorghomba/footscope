@@ -97,6 +97,32 @@ assert.equal(check([]).noTicketReason, NO_CANDIDATE_REASON);
 assert.equal(check(single('Book', [0.5])).selections.length, 1);
 assert.equal(check(single('Book', [0.4999999])).selections.length, 0);
 assert.equal(check(single('Book', [1, 0.5, 0.99])).selections.length, 2);
+// Produit combiné exactement au seuil : 1 × 0,8 × 0,625 = 0,5, accepté.
+const exact = check(single('Book', [1, 0.8, 0.625]));
+assert.equal(exact.selections.length, 3);
+assert.equal(exact.ticketProbability, 0.5);
+
+// Égalités : à probabilité et marge égales, l'ordre d'entrée décide (tri stable).
+const ties = single('Book', [0.85, 0.85, 0.85, 0.85, 0.85]);
+const shuffled = [ties[4], ties[1], ties[2], ties[0], ties[3]];
+assert.deepEqual(
+  check(shuffled).selections.map((e) => e.matchId),
+  [5, 2, 3, 1],
+);
+assert.deepEqual(
+  check(shuffled).selections.map((e) => e.matchId),
+  [5, 2, 3, 1],
+  'Même entrée, même ticket',
+);
+// À probabilité égale, la meilleure marge prudente passe devant, puis l'ordre d'entrée.
+ties[3].events[0].prudentEdge = 0.2;
+assert.deepEqual(
+  check(ties).selections.map((e) => e.matchId),
+  [4, 1, 2, 3],
+);
+// Deux bookmakers à égalité parfaite : le premier rencontré l'emporte (hors bet365).
+const level = [report(1, [event(1, 'A', 0.8), event(1, 'B', 0.8)])];
+assert.equal(check(level).bookmaker, 'A');
 
 // Critère 5 : deux bookmakers au-dessus du seuil, bet365 préféré selon la tolérance existante.
 const duel = (bet365, other) => [
@@ -201,5 +227,5 @@ for (let round = 0; round < 300; round++) {
 }
 
 console.log(
-  'Passed: ticket probability 0.9/0.72 greedy (0.648), four at 0.85 (0.522), no ticket below 0.5 with reason, threshold bounds, bet365 tolerance above threshold only, exploratory product, invalid inputs, duplicate match, 300 brute-force universes.',
+  'Passed: ticket probability 0.9/0.72 greedy (0.648), four at 0.85 (0.522), no ticket below 0.5 with reason, threshold bounds, bet365 tolerance above threshold only, exploratory product, exact 0.5 product, stable ties, invalid inputs, duplicate match, 300 brute-force universes.',
 );
