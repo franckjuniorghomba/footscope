@@ -464,6 +464,130 @@ const reviewedOk = await review([
 ]);
 assert.equal(reviewedOk.market.allSelectionsHaveValue, true);
 assert.equal(reviewedOk.verdict, 'simulation_eligible');
+
+// Égalité exacte des deux cotes : « À la cote juste », jamais une valeur positive.
+const equal = marketValue(bet('Match Winner', 'Home', 29 / 14), pinnacle(), now);
+assert.equal(equal.hasValue, false);
+assert.equal(equal.atFairOdd, true);
+assert.equal(home.atFairOdd, false);
+assert.equal(below.atFairOdd, false);
+
+// Revue PR #20 — tous les candidats sont comparés, pas seulement les cinq transmis au LLM.
+const manyUniverse = (sharp) => [
+  ...universe(sharp),
+  ...Array.from({ length: 6 }, (_, i) =>
+    proposalReport(
+      10 + i,
+      [event(10 + i, { prudentProbability: 0.3 - i * 0.01 })],
+      // Le dernier candidat n'a aucun repère Pinnacle.
+      i === 5 ? undefined : sharp(10 + i),
+    ),
+  ),
+];
+const many = await propose(manyUniverse(sharpWithSentinel));
+const llmMany = llmInputs.slice();
+const manyWithout = await propose(manyUniverse(() => undefined));
+const llmManyWithout = llmInputs.slice();
+assert.equal(many.excludedCandidatesCount, 7);
+assert.equal(many.excludedCandidates.length, 5, 'Entrée LLM toujours bornée à cinq candidats');
+const excludedChecks = many.market.checks.filter((c) => c.role === 'excluded');
+assert.equal(excludedChecks.length, 7, 'Chaque candidat a sa comparaison');
+assert.deepEqual(
+  excludedChecks.map((c) => c.index),
+  [0, 1, 2, 3, 4, 5, 6],
+);
+assert.deepEqual(
+  excludedChecks.map((c) => c.matchId).sort((a, b) => a - b),
+  [9, 10, 11, 12, 13, 14, 15],
+);
+assert.equal(excludedChecks.find((c) => c.matchId === 15).reasonCode, 'NO_REFERENCE');
+assert.equal(excludedChecks.find((c) => c.matchId === 14).reasonCode, null);
+assert.equal(excludedChecks.find((c) => c.matchId === 14).match, 'Club 14 — Visiteur 14');
+assert.deepEqual(strip(many), strip(manyWithout), 'Décisions identiques avec 7 candidats');
+assert.deepEqual(parsed(llmMany), parsed(llmManyWithout), 'Entrée LLM inchangée');
+assert(!llmMany[0].includes(SENTINEL) && !llmMany[0].includes('marketValue'));
+assert(!llmMany[0].includes('Club 15'), 'Le sixième candidat n’atteint pas le LLM');
+
+// Rendu de l'interface (src/web/app.js) sur les réponses réelles de la route.
+const { readFile } = await import('node:fs/promises');
+const { runInNewContext } = await import('node:vm');
+const ui = await readFile(new URL('../src/web/app.js', import.meta.url), 'utf8');
+const box = { classList: { remove() {} }, innerHTML: '' };
+const ctx = {
+  $: (q) => (q === '#assistantResult' ? box : null),
+  kickoff: () => '',
+  crest: () => '',
+};
+runInNewContext(
+  ui.slice(ui.indexOf('const esc ='), ui.indexOf('const tz =')) +
+    ui.slice(ui.indexOf('function verdictLabel('), ui.indexOf('let assistantBusy')),
+  ctx,
+);
+const render = (d) => {
+  ctx.showAssistant(d);
+  return box.innerHTML;
+};
+const count = (html, re) => (html.match(re) || []).length;
+// Avec ticket : 2 sélections (badge dans le ticket et dans le détail) et 7 candidats.
+let html = render(many);
+assert.equal(count(html, /class="valuebadge"/g), 2 + 2 + 7);
+assert(html.includes('Candidats écartés (7)'));
+for (const id of [9, 10, 11, 12, 13, 14, 15]) assert(html.includes('Club ' + id + ' — '), id);
+assert(html.includes('Pas de repère Pinnacle'), 'Raison du candidat sans repère');
+
+// Sans ticket : tous les candidats sous le seuil, rendus avec badge ou raison.
+const noTicketUniverse = [
+  proposalReport(21, [event(21, { prudentProbability: 0.3 })], sharpWithSentinel(21)),
+  proposalReport(22, [event(22, { prudentProbability: 0.2, odd: 1.9 })], sharpWithSentinel(22)),
+  proposalReport(23, [event(23, { prudentProbability: 0.1 })]),
+];
+const none = await propose(noTicketUniverse);
+assert.equal(none.selections.length, 0);
+assert.equal(none.market.allSelectionsHaveValue, null);
+html = render(none);
+assert(!html.includes('class="picks"'), 'Aucun ticket rendu');
+assert.equal(count(html, /class="valuebadge"/g), 3);
+assert(html.includes('Candidats écartés (3)'));
+assert(html.includes('Valeur face au marché +1,4 %'), 'Badge vert du candidat 21');
+assert(html.includes('Sous la cote juste −8,3 %'), 'Badge gris du candidat 22');
+assert(html.includes('Valeur face au marché : —'), 'Candidat 23 sans repère');
+
+// Examen : la sélection absente du fournisseur garde son badge « — » et sa raison.
+html = render(reviewed);
+assert.equal(count(html, /class="valuebadge"/g), 2, 'Un badge par sélection examinée');
+assert(html.includes('Valeur face au marché : —'));
+assert(html.includes(MARKET_VALUE_REASONS.EVENT_MISSING));
+assert(!html.includes('Candidats écartés'));
+// Le check manquant n'a repris aucune donnée du client (cote 50 non comparée).
+assert.equal(reviewed.market.checks[1].index, 1);
+assert.equal(reviewed.market.checks[1].odd, null);
+assert.equal(reviewed.market.checks[1].marketName, null);
+assert.equal(
+  ctx.valueCheck(reviewed.market, 'review', 1, reviewed.reviews[1]).reasonCode,
+  'EVENT_MISSING',
+);
+// Une association incohérente (autre match à la même position) ne rend aucun badge.
+assert.equal(ctx.valueCheck(reviewed.market, 'review', 0, { matchId: 99 }), undefined);
+
+// Égalité : libellé « À la cote juste », sans pourcentage.
+html = render({
+  verdict: 'simulation_eligible',
+  selections: [],
+  reviews: [{ ...event(7), odd: 29 / 14 }],
+  market: { checks: [{ role: 'review', index: 0, ...equal }], allSelectionsHaveValue: false },
+});
+assert(html.includes('>À la cote juste<'));
+assert(!html.includes('Sous la cote juste'));
+// Écart non nul trop petit pour une décimale : signé, distinct de l'égalité.
+const tiny = marketValue(bet('Match Winner', 'Home', 2.0712), pinnacle(), now);
+assert.equal(tiny.atFairOdd, false);
+html = render({
+  verdict: 'simulation_eligible',
+  selections: [],
+  reviews: [event(7)],
+  market: { checks: [{ role: 'review', index: 0, ...tiny }], allSelectionsHaveValue: false },
+});
+assert(html.includes('Sous la cote juste\u00a0−&lt;0,1\u00a0%'));
 console.log(
-  'Passed: valeur face au marché 29/14 (+1,38 %), plus/moins et BTTS à 2 issues (1e-9), double chance par 1X2 juste, refus null (absent, périmé, autre match, incomplet, hors bet365, client), ticket/verdicts/LLM inchangés, sentinelle absente.',
+  'Passed: valeur face au marché 29/14 (+1,38 %), tous les candidats comparés et rendus (7 > 5, sans repère, sans ticket), badge « — » d’une sélection absente, « À la cote juste », plus/moins et BTTS à 2 issues (1e-9), double chance par 1X2 juste, refus null (absent, périmé, autre match, incomplet, hors bet365, client), ticket/verdicts/LLM inchangés, sentinelle absente.',
 );

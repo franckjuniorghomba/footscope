@@ -906,22 +906,26 @@ function verdictLabel(v) {
 }
 // BIS-200 : valeur face au marché fournie par le serveur (d.market), jamais recalculée ici.
 // Descriptive : elle ne dit pas qu'une sélection est gagnante et ne change pas le ticket.
-function valueCheck(market, x, roles) {
+// Association par rôle et position (index fourni par le serveur) : elle tient même quand
+// la sélection est absente du fournisseur et que le serveur n'a repris aucune de ses données.
+function valueCheck(market, role, index, x) {
   return (market?.checks || []).find(
     (c) =>
-      roles.includes(c.role) &&
-      c.matchId === x.matchId &&
-      c.marketName === x.market &&
-      c.selection === x.selection &&
-      c.bookmaker === x.bookmaker,
+      c.role === role &&
+      c.index === index &&
+      (c.matchId === null || c.matchId === undefined || c.matchId === x?.matchId),
   );
 }
+// Un écart non nul trop petit pour une décimale reste signé (« −<0,1 % ») : il ne se
+// confond pas avec l'égalité, affichée « À la cote juste ».
 const signedPercent = (v) =>
   (v > 0 ? '+' : v < 0 ? '−' : '') +
-  Math.abs(v * 100).toLocaleString('fr-FR', {
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1,
-  }) +
+  (v !== 0 && Math.abs(v) < 0.0005
+    ? '&lt;0,1'
+    : Math.abs(v * 100).toLocaleString('fr-FR', {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      })) +
   '\u00a0%';
 function valueBadge(check) {
   if (!check) return '';
@@ -934,6 +938,12 @@ function valueBadge(check) {
   const fair =
     'cote juste Pinnacle\u00a0' +
     check.fairOdd.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (check.atFairOdd)
+    return (
+      '<span class="valuebadge"><span class="tag muted">À la cote juste</span><small>bet365 égal à la ' +
+      fair +
+      '</small></span>'
+    );
   return check.hasValue
     ? '<span class="valuebadge"><span class="tag ok">Valeur face au marché\u00a0' +
         signedPercent(check.marketValue) +
@@ -960,7 +970,7 @@ function valueFact(market) {
     '<small>bet365 contre cote juste Pinnacle · repère descriptif, pas une promesse de gain</small></dd></div>'
   );
 }
-function eventHTML(x, market, roles) {
+function eventHTML(x, market, role, index) {
   return (
     '<div class="eventitem"><b>' +
     esc(x.match) +
@@ -975,7 +985,7 @@ function eventHTML(x, market, roles) {
     '">' +
     verdictLabel(x.status) +
     '</span>' +
-    valueBadge(valueCheck(market, x, roles)) +
+    valueBadge(valueCheck(market, role, index, x)) +
     (x.probability !== null && x.probability !== undefined
       ? '<p class="note">Estimation exploratoire : ' +
         (x.probability * 100).toFixed(1) +
@@ -996,7 +1006,7 @@ function eventHTML(x, market, roles) {
     '</p></div>'
   );
 }
-function pickHTML(x, market) {
+function pickHTML(x, market, index) {
   return (
     '<li class="pick"><span class="crests">' +
     String(x.match ?? '')
@@ -1016,8 +1026,35 @@ function pickHTML(x, market) {
     '</span></div><span class="odd"><span class="visually-hidden">Cote </span>' +
     Number(x.odd).toFixed(2) +
     '</span>' +
-    valueBadge(valueCheck(market, x, ['selection'])) +
+    valueBadge(valueCheck(market, 'selection', index, x)) +
     '</li>'
+  );
+}
+// Candidats écartés par le seuil du ticket : tous ceux du serveur (pas seulement les cinq
+// transmis au LLM), chacun avec son badge de valeur ou la raison de son absence.
+function candidatesHTML(market) {
+  const list = (market?.checks || []).filter((c) => c.role === 'excluded');
+  if (!list.length) return '';
+  return (
+    '<details class="more candidates"><summary>Candidats écartés (' +
+    list.length +
+    ')</summary><p class="note">Hors ticket : les ajouter ferait passer la probabilité du ticket sous le seuil.</p>' +
+    list
+      .map(
+        (c) =>
+          '<div class="eventitem"><b>' +
+          esc(c.match ?? 'Match ' + (c.matchId ?? '—')) +
+          '</b><br>' +
+          esc(c.marketName ?? '—') +
+          ' · ' +
+          esc(c.selection ?? '—') +
+          (Number.isFinite(c.odd) ? ' @ ' + c.odd.toFixed(2) : '') +
+          (c.bookmaker ? ' · ' + esc(c.bookmaker) : '') +
+          valueBadge(c) +
+          '</div>',
+      )
+      .join('') +
+    '</details>'
   );
 }
 // Le ticket du jour : sélections, bookmaker, cote combinée et, si l'API la fournit,
@@ -1046,7 +1083,7 @@ function showAssistant(d) {
     '</p>' +
     (picks.length
       ? '<ol class="picks">' +
-        picks.map((x) => pickHTML(x, d.market)).join('') +
+        picks.map((x, i) => pickHTML(x, d.market, i)).join('') +
         '</ol><dl class="ticketfacts"><div><dt>Bookmaker</dt><dd>' +
         esc([...new Set(picks.map((x) => x.bookmaker))].join(', ')) +
         '</dd></div>' +
@@ -1087,13 +1124,14 @@ function showAssistant(d) {
         (notes.length
           ? '<ul class="reasons">' + notes.map((n) => '<li>' + esc(n) + '</li>').join('') + '</ul>'
           : '') +
-        reviews.map((x) => eventHTML(x, d.market, ['review'])).join('') +
-        picks.map((x) => eventHTML(x, d.market, ['selection'])).join('') +
+        reviews.map((x, i) => eventHTML(x, d.market, 'review', i)).join('') +
+        picks.map((x, i) => eventHTML(x, d.market, 'selection', i)).join('') +
         '</details>'
       : '') +
     (picks.length
       ? '<button id="useProposal" class="btn primary block">Copier dans mon coupon</button>'
-      : '');
+      : '') +
+    candidatesHTML(d.market);
   if ($('#useProposal'))
     $('#useProposal').onclick = () => {
       if (coupon.length && !confirm('Remplacer le coupon actuel ?')) return;

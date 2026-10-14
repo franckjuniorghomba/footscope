@@ -111,6 +111,9 @@ function thresholdExcludedCandidates(reports, ticket, now) {
     });
   return {
     count: excluded.length,
+    // Tous les candidats (événements serveur), pour la valeur face au marché descriptive ;
+    // l'entrée du LLM reste bornée aux cinq premiers ci-dessous.
+    events: excluded,
     candidates: excluded.slice(0, 5).map((e) => ({
       matchId: e.matchId,
       match: e.match,
@@ -247,7 +250,8 @@ export async function assistant(req, env, path) {
     blockers = [],
     ticket = null,
     excludedCandidates = [],
-    excludedCandidatesCount = 0;
+    excludedCandidatesCount = 0,
+    excludedEvents = [];
   // Événements serveur seulement, pour la valeur face au marché (jamais l'entrée du client).
   const reviewedEvents = [];
   const scope = preparedJob?.scope || body.scope || {};
@@ -286,6 +290,7 @@ export async function assistant(req, env, path) {
     const excluded = thresholdExcludedCandidates(allowed, ticket, now);
     excludedCandidates = excluded.candidates;
     excludedCandidatesCount = excluded.count;
+    excludedEvents = excluded.events;
     selections = ticket.selections;
   } else {
     if (!Array.isArray(body.selections) || body.selections.length < 1 || body.selections.length > 4)
@@ -383,15 +388,7 @@ export async function assistant(req, env, path) {
   result.market = marketValueSummary(reports, {
     selection: selections,
     review: reviewedEvents,
-    excluded: excludedCandidates.map(
-      (c) =>
-        reports
-          .find((r) => r.matchId === c.matchId)
-          ?.events.find(
-            (e) =>
-              e.market === c.market && e.selection === c.selection && e.bookmaker === c.bookmaker,
-          ) ?? { missing: true, matchId: c.matchId },
-    ),
+    excluded: excludedEvents,
   });
   let explanation;
   try {

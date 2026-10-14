@@ -163,6 +163,7 @@ function fairProbability(reference, market, selection, now) {
 export function marketValue(event, reference, now = Date.now()) {
   const base = {
     matchId: event?.matchId ?? null,
+    match: event?.missing !== true && typeof event?.match === 'string' ? event.match : null,
     marketName: typeof event?.market === 'string' ? event.market : null,
     selection: typeof event?.selection === 'string' ? event.selection : null,
     bookmaker: typeof event?.bookmaker === 'string' ? event.bookmaker : null,
@@ -173,6 +174,7 @@ export function marketValue(event, reference, now = Date.now()) {
     fairOdd: null,
     marketValue: null,
     hasValue: null,
+    atFairOdd: null,
   };
   const refuse = (code) => ({ ...base, reasonCode: code, reason: MARKET_VALUE_REASONS[code] });
   // Sélection non retrouvée côté serveur : aucune donnée du client n'est comparée.
@@ -202,6 +204,7 @@ export function marketValue(event, reference, now = Date.now()) {
     marketValue: value,
     // Marge d'arrondi : une cote égale à la cote juste n'a pas de valeur.
     hasValue: value > 1e-9,
+    atFairOdd: Math.abs(value) <= 1e-9,
     reasonCode: null,
     reason: null,
   };
@@ -213,8 +216,11 @@ export function marketValueSummary(reports, groups, now = Date.now()) {
   const references = new Map((reports || []).map((r) => [r.matchId, r.sharpReference ?? null]));
   const checks = [];
   for (const [role, events] of Object.entries(groups))
-    for (const event of events || [])
-      checks.push({ role, ...marketValue(event, references.get(event?.matchId), now) });
+    // index : position dans le groupe (selections, reviews ou candidats), clé d'affichage
+    // stable même quand l'événement est absent du fournisseur.
+    (events || []).forEach((event, index) =>
+      checks.push({ role, index, ...marketValue(event, references.get(event?.matchId), now) }),
+    );
   const ticket = checks.filter((x) => x.role === 'selection' || x.role === 'review');
   return {
     referenceBookmaker: SHARP_BOOKMAKER,
