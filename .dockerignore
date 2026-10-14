@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+**/.env
+**/.env.*
+node_modules
+.build
+dist
+coverage
+upload
+*.zip

@@ -26,6 +26,7 @@ export function createRelayServer({ token, fetchUpstream = fetch }) {
       });
       res.end(typeof body === 'string' ? body : JSON.stringify(body));
     };
+    if (req.method === 'GET' && req.url === '/health') return send(200, { ready: true });
     if (req.method !== 'GET')
       return send(405, { error: 'Méthode non autorisée' }, { Allow: 'GET' });
     const supplied = Buffer.from(String(req.headers['x-relay-token'] || ''));
@@ -56,7 +57,9 @@ export function createRelayServer({ token, fetchUpstream = fetch }) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.PORT || 8787);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw Error('PORT invalide.');
-  createRelayServer({ token: process.env.RELAY_TOKEN }).listen(port, '127.0.0.1', () =>
+  const host = process.env.RELAY_BIND_ADDRESS || '127.0.0.1';
+  if (!['127.0.0.1', '0.0.0.0'].includes(host)) throw Error('Adresse d’écoute invalide.');
+  createRelayServer({ token: process.env.RELAY_TOKEN }).listen(port, host, () =>
     console.log('Relais API-Football sur le port ' + port),
   );
 }

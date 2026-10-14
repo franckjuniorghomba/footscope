@@ -11,13 +11,15 @@ concurrency:
   cancel-in-progress: true
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.21.0'
           cache: npm
       - run: npm ci
       - run: npm run check
+      - name: Vérifier les conteneurs et la sécurité HTTPS locale
+        run: bash scripts/check-relay-containers.sh
