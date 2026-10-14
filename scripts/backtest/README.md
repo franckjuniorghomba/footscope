@@ -34,32 +34,71 @@ Ne pas afficher la clé. Le plan est fixé dans `plan.json` : dix premières div
 saisons 2023, 2024, 2025, développement 2024/25, test 2025/26.
 
 ```sh
+export BACKTEST_BUDGET_FILE="$JARVIS_LIVRABLES/budget-api-football.json"
+# Une seule fois, uniquement pour une première collecte sans appels antérieurs :
+node scripts/backtest/budget.mjs --used 0 --reason "Première collecte autorisée BIS-167"
 node scripts/backtest/collect.mjs --out "$JARVIS_LIVRABLES/api-football"
 node scripts/backtest/run.mjs \
   --input "$JARVIS_LIVRABLES/api-football/dataset.json" \
   --out "$JARVIS_LIVRABLES/historical"
 ```
 
-Sans clé, le collecteur échoue explicitement avant tout appel. Un abonnement dont
+Sans registre initialisé ou sans clé, le collecteur échoue avant tout appel. Un abonnement dont
 la couverture n'inclut pas ces saisons peut également refuser la collecte. Il faut
 alors signaler ce refus, sans annoncer de résultat prédictif ni acheter de données.
 
 Un appel `fixtures?league=…&season=…` par couple, **trente tentatives maximum**,
 espacées de 6,5 secondes. Aucun autre endpoint, aucun appel par match, aucune
-pagination supplémentaire et aucun retry automatique. Le journal `collection.json`
-réserve la tentative avant le réseau ; un timeout, un refus ou une interruption
+pagination supplémentaire et aucun retry automatique. Le registre global
+réserve la tentative avant le réseau (écriture atomique et synchronisation disque) ; un timeout, un refus ou une interruption
 consomment donc leur tentative. Les erreurs et corps de réponse ne sont pas
 recopiés dans les journaux. Les données conservées se limitent aux identifiants,
 équipes, date, ligue, statut et score publics des rencontres.
 
-Conserver **le même dossier et le même journal** pendant toute cette collecte
-unique. Ne pas repartir dans un dossier neuf pour contourner le budget. La relance
-réutilise les fichiers terminés après vérification SHA-256, même sans clé. Une
+Le registre unique est choisi par `BACKTEST_BUDGET_FILE`, sinon
+`$JARVIS_LIVRABLES/budget-api-football.json`, sinon le chemin fixe
+`/root/.local/share/jarvis/livrables/footscope/BIS-167/budget-api-football.json`.
+Il doit être **hors de tout dossier `--out`**. Toutes les collectes de ce budget
+doivent utiliser ce même fichier partagé, y compris depuis d'autres checkouts.
+Changer `--out` ou supprimer `collection.json` ne restitue aucune tentative.
+Le registre absent (même avec un cache existant), illisible ou incohérent provoque
+un refus ; le collecteur ne crée jamais de compteur à zéro automatiquement.
+Le verrou exclusif `<registre>.lock` est tenu pendant toute la collecte : une
+seconde collecte simultanée est refusée, même avec une autre sortie. L'espacement
+de 6,5 secondes utilise la dernière réservation globale. La coordination exige
+un même système de fichiers avec création exclusive et renommage atomique ;
+des registres sur des machines indépendantes ne partagent pas ce budget.
+
+Conserver le journal et les caches : la relance réutilise les fichiers terminés
+après vérification SHA-256, même sans clé. Une
 réponse en erreur ou paginée, une somme différente ou un couple déjà tenté sans
 cache arrête la collecte pour examen manuel ; ne pas effacer son entrée pour
 réessayer. Après un arrêt brutal, vérifier que le processus est terminé avant de
-retirer manuellement `collect.lock`. Ne pas lancer simultanément une autre collecte
+retirer manuellement `collect.lock` et `<registre>.lock`. Ne pas lancer simultanément une autre collecte
 payante avec la même clé ; la coordination des appels du Worker demeure inchangée.
+
+### Initialisation, reprise des anciens caches et réinitialisation
+
+`budget.mjs --used N --reason "motif écrit sans secret"` est une action manuelle
+explicite. Elle refuse d'écraser un registre existant. `--used` représente les
+appels déjà consommés avant son installation, en plus des futures réservations.
+**Avec d'anciens caches/journaux, ne jamais initialiser à zéro** : auditer tous les
+dossiers et toutes les tentatives, y compris les échecs, puis renseigner ce total.
+Si le total est inconnu, initialiser avec `--used 30` : aucun nouveau réseau ne
+sera permis. Les anciens caches vérifiés restent lisibles si leur nombre de
+tentatives est couvert par ce solde initial. Un journal manquant demande un
+examen manuel, sans nouvelle collecte pour recréer ses fichiers.
+
+Une remise à zéro exige une **nouvelle autorisation budgétaire écrite du responsable**.
+Arrêter les collecteurs, vérifier l'absence de processus et de verrou actif,
+archiver le registre avec ses journaux/caches (sans les supprimer), puis exécuter
+explicitement l'initialisation `--used 0 --reason "Référence de la nouvelle autorisation"`
+au **même chemin**. Archiver par exemple le registre par un déplacement vers
+`budget-api-football-budget-precedent.json` hors `--out`, après avoir vérifié que
+cette archive n'existe pas. Changer `BACKTEST_BUDGET_FILE`, effacer le registre,
+modifier ses réservations ou enlever un verrou actif ne constitue pas une reprise.
+Un registre corrompu doit être restauré depuis son archive ou remplacé après audit
+avec `--used 30` si l'historique des appels ne peut pas être établi.
 
 Le collecteur fige `dataset.json`, `dataset-checksum.json`, les trente fichiers de
 résultats normalisés et le journal. Le runner vérifie aussi la somme du jeu
@@ -104,6 +143,8 @@ réussir sur un checkout propre : les prompts locaux `.workmux/PROMPT-*.md` ne f
 pas partie du code et ne doivent pas être modifiés pour corriger leur format.
 
 Aucune migration SQL : retrait possible des scripts et de l'ADR, conservation des
-jeux et rapports hors dépôt pour audit. Aucune table, colonne ou donnée de production
+jeux, rapports et registre global hors dépôt pour audit. Suspendre la collecte si
+le correctif est retiré : ne pas relancer l'ancien collecteur qui ne protège pas
+le budget global. Aucune table, colonne ou donnée de production
 n'est touchée. Voir `docs/adr/0001-backtest.md` pour les limites scientifiques et
 les futures décisions de sources.

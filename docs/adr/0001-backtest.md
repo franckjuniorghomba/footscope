@@ -27,8 +27,11 @@ La [documentation des colonnes](https://football-data.co.uk/notes.txt) identifie
 les clôtures par `C` (1X2 bet365 et totaux 2,5). La page des données annonce ces
 relevés depuis 2019/20 et répertorie dix pays européens pertinents. Une sonde
 structurelle E0 2023/24 avait montré 380 lignes renseignées pour ces cinq colonnes
-avant découverte de la restriction ; cette sonde reste hors dépôt et ne sert à
-aucun entraînement ou backtest. Elle ne prouve pas la couverture des autres ligues.
+avant découverte de la restriction ; cette sonde ne sert à aucun entraînement ou
+backtest. Le fichier brut doit être isolé des livrables de travail dans la quarantaine
+`BIS-167-quarantaine`. Une note hors dépôt conserve la provenance, la date, le SHA-256
+et le constat. La suppression définitive revient à l'humain. La sonde ne prouve pas la
+couverture des autres ligues.
 
 La comparaison au marché sans marge et le rendement sont **reportés**, avec valeurs
 nulles/absentes et motif explicite dans les rapports, plutôt qu'une cote supposée.
@@ -54,13 +57,21 @@ Aucune prolongation ou séance de tirs au but n'entre dans les résultats évalu
 Le collecteur n'utilise aucun résultat d'un autre fournisseur ni donnée client.
 
 Un appel `fixtures` par ligue/saison, jamais par match ; cache et journal persistants
-extérieurs au dépôt, verrou exclusif par dossier, intervalle de 6,5 secondes,
+extérieurs au dépôt, registre de budget unique hors des sorties `--out`, verrou
+global exclusif et verrou par dossier, intervalle de 6,5 secondes,
 timeout de trente secondes, refus des redirections et arrêt sur erreur, réponse
 vide/incohérente ou pagination. Chaque tentative est réservée avant le réseau,
 y compris les refus et interruptions ; aucun retry automatique. Le budget global
-de cette collecte unique est trente. Il ne faut pas recommencer dans un autre
-dossier pour réinitialiser le budget ni lancer d'appels payants concurrents avec
-la même clé. Le Worker et sa coordination existante ne sont pas modifiés.
+de cette collecte unique est trente. `BACKTEST_BUDGET_FILE` choisit le registre,
+sinon `$JARVIS_LIVRABLES/budget-api-football.json` ou le chemin fixe documenté dans
+le README. Chaque réservation est synchronisée puis renommée atomiquement avant
+le réseau. Le verrou global couvre toute la collecte et refuse un second processus,
+même dans une autre sortie. Changement de sortie, suppression du journal et relance
+ne restituent aucun appel. Un registre absent/illisible est un refus, même avec
+cache. L'initialisation et la remise à zéro sont des actions explicites documentées ;
+les anciens appels doivent être comptabilisés, et une nouvelle enveloppe nécessite
+une autorisation écrite. La coordination repose sur un fichier partagé, pas sur
+des registres indépendants par machine. Le Worker demeure inchangé.
 
 `API_FOOTBALL_KEY` provient uniquement de l'environnement ; aucun secret du disque
 n'est lu, aucun secret ou corps d'erreur fournisseur n'est affiché ou enregistré.
@@ -157,6 +168,10 @@ sur ses probabilités ou sa composition, parité modèle/sélecteur, scores calc
 la main, bootstrap par journée, données invalides, budget de trente appels, délais,
 cache idempotent, corruption, refus/pagination, absence de clé, secret factice
 expurgé et refus de sorties dans le dépôt (y compris liens symboliques).
+Les tests comptent les appels effectifs du fetch simulé : trente au total malgré
+changement de sortie, suppression du journal, relance et deux processus simultanés.
+Trente refus HTTP 503 épuisent également l'enveloppe ; les tentatives interrompues
+restent comptées. Onze permutations d'entrée reproduisent le même rapport.
 
 `npm ci` et `npm run check` sur copie propre sans `.workmux/PROMPT-*.md` ; ne pas
 modifier ces prompts. PR vers `dev`, CI verte, rapport hors dépôt. La durée et la
@@ -167,6 +182,9 @@ Ce n'est pas une optimisation avec promesse d'amélioration prédictive.
 de production. L'ancienne version reste compatible. Pas de table/colonne supprimée,
 verrou SQL, index nouveau ou `EXPLAIN` applicable. Plan de retour : retirer les
 scripts, la fixture synthétique et l'ADR, conserver les jeux et rapports extérieurs
-pour audit ; ne pas effacer le journal de budget pour refaire des appels. Aucune
+pour audit ; ne pas effacer le registre global de budget pour refaire des appels.
+Si ce correctif est retiré, suspendre la collecte ; ne pas réactiver l'ancien
+collecteur dépourvu du registre global. L'application et le runner hors ligne
+restent compatibles avec les jeux existants. Aucune
 donnée de production n'a besoin d'être restaurée. Une migration montante ou
 descendante n'est donc pas requise.

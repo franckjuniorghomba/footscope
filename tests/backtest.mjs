@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile, symlink } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile, symlink, unlink } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { collect } from '../scripts/backtest/collect.mjs';
+import { initializeBudget } from '../scripts/backtest/budget.mjs';
 import {
   dayStart,
   externalDirectory,
@@ -22,6 +24,20 @@ import { writeReport } from '../scripts/backtest/run.mjs';
 const input = 'tests/fixtures/backtest-demo.json';
 const demo = await readJson(input);
 const report = runBacktest(demo);
+// Régression du relecteur : dix mélanges déterministes et l'ordre inverse.
+const stableReport = (r) => ({ ...r, elapsedMs: 0 });
+let shuffleSeed = 42;
+for (let k = 0; k < 11; k++) {
+  const shuffled = structuredClone(demo);
+  if (k === 10) shuffled.fixtures.reverse();
+  else
+    for (let i = shuffled.fixtures.length - 1; i > 0; i--) {
+      shuffleSeed = (Math.imul(shuffleSeed, 1103515245) + 12345) >>> 0;
+      const j = Math.floor((shuffleSeed / 2 ** 32) * (i + 1));
+      [shuffled.fixtures[i], shuffled.fixtures[j]] = [shuffled.fixtures[j], shuffled.fixtures[i]];
+    }
+  assert.deepEqual(stableReport(runBacktest(shuffled)), stableReport(report));
+}
 assert.equal(report.kind, 'demonstration');
 assert.equal(report.test.matches, 16);
 assert.equal(
@@ -189,6 +205,11 @@ assert.equal(bootstrapDays([], () => ({ value: null }), 200, 167).value.interval
 
 const root = await mkdtemp(join(tmpdir(), 'footscope-backtest-test-'));
 try {
+  const newBudget = async (name, used = 0) => {
+    const budgetFile = join(root, name + '-budget.json');
+    await initializeBudget({ budgetFile, used, reason: 'Test synthétique isolé' });
+    return budgetFile;
+  };
   await assert.rejects(externalDirectory(join(repoRoot, 'generated-results')), /hors dépôt/);
   await symlink(repoRoot, join(root, 'repo-link'));
   await assert.rejects(
@@ -204,6 +225,11 @@ try {
     waits = [];
   const fetchImpl = async (url, options) => {
     calls++;
+    assert.equal(
+      (await readJson(budgetFile)).attempts.length,
+      calls,
+      'Chaque fetch réel commence après la réservation persistante',
+    );
     assert.equal(options.headers['x-apisports-key'], 'fixture-key');
     assert.equal(options.redirect, 'error');
     const u = new URL(url),
@@ -224,8 +250,10 @@ try {
     };
   };
   const out = join(root, 'success');
+  const budgetFile = await newBudget('success');
   const result = await collect({
     out,
+    budgetFile,
     key: 'fixture-key',
     plan,
     fetchImpl,
@@ -242,32 +270,134 @@ try {
   await writeFile(result.path, collected + ' ');
   await assert.rejects(writeReport(result.path, join(root, 'altered-rendered')), /altéré/);
   await writeFile(result.path, collected);
-  await collect({ out, plan, fetchImpl });
+  await collect({ out, budgetFile, plan, fetchImpl });
   assert.equal(calls, 30, 'Reprise sans clé depuis le cache : zéro nouvel appel');
   assert(!JSON.stringify(await readJson(join(out, 'collection.json'))).includes('fixture-key'));
+  assert(!(await readFile(budgetFile, 'utf8')).includes('fixture-key'));
+  const journalBytes = await readFile(join(out, 'collection.json'));
+  await unlink(join(out, 'collection.json'));
+  await assert.rejects(
+    collect({ out, budgetFile, key: 'fixture-key', plan, fetchImpl }),
+    /Cache existant sans journal/,
+  );
+  assert.equal(calls, 30, 'Suppression du journal : zéro nouvel appel réel');
+  await assert.rejects(
+    collect({ out: join(root, 'other-out'), budgetFile, key: 'fixture-key', plan, fetchImpl }),
+    /Budget global/,
+  );
+  assert.equal(calls, 30, 'Changement de --out : zéro nouvel appel réel');
+  await writeFile(join(out, 'collection.json'), journalBytes);
+  const budgetBytes = await readFile(budgetFile);
+  await unlink(budgetFile);
+  await assert.rejects(
+    collect({ out, budgetFile, key: 'fixture-key', plan, fetchImpl }),
+    /absent ou illisible/,
+  );
+  assert.equal(calls, 30, 'Registre absent avec cache : refus avant réseau');
+  await writeFile(budgetFile, '{');
+  await assert.rejects(
+    collect({ out, budgetFile, key: 'fixture-key', plan, fetchImpl }),
+    /absent ou illisible/,
+  );
+  await writeFile(
+    budgetFile,
+    JSON.stringify({ schemaVersion: 1, initialCalls: -1, reason: 'invalid', attempts: [] }),
+  );
+  await assert.rejects(
+    collect({ out, budgetFile, key: 'fixture-key', plan, fetchImpl }),
+    /incohérent/,
+  );
+  await writeFile(budgetFile, budgetBytes);
+  await assert.rejects(
+    initializeBudget({ budgetFile, used: 0, reason: 'Ne pas écraser' }),
+    /existant/,
+  );
+  const nestedBudget = join(out, 'nested-budget.json');
+  await initializeBudget({ budgetFile: nestedBudget, used: 0, reason: 'Test chemin interdit' });
+  await assert.rejects(
+    collect({ out, budgetFile: nestedBudget, plan, fetchImpl }),
+    /hors du dossier/,
+  );
+  assert.equal(calls, 30);
+  const migratedBudget = await newBudget('migration-old-journal', 30);
+  await collect({ out, budgetFile: migratedBudget, plan, fetchImpl });
+  assert.equal(calls, 30, 'Ancien journal repris avec solde audité : aucun nouvel appel');
   await writeFile(join(out, 'fixtures-39-2023.json'), '[]');
-  await assert.rejects(collect({ out, key: 'fixture-key', plan, fetchImpl }), /Cache altéré/);
+  await assert.rejects(
+    collect({ out, budgetFile, key: 'fixture-key', plan, fetchImpl }),
+    /Cache altéré/,
+  );
   assert.equal(calls, 30);
   const missingKey = join(root, 'missing-key');
-  await assert.rejects(collect({ out: missingKey, plan, fetchImpl }), /KEY absente/);
+  await assert.rejects(
+    collect({ out: missingKey, budgetFile: await newBudget('missing-key'), plan, fetchImpl }),
+    /KEY absente/,
+  );
   assert.equal(calls, 30);
   const failed = join(root, 'failed');
+  const failedBudget = await newBudget('failed');
+  let failedCalls = 0;
   const broken = async () => {
-    throw Error('fixture-key transport details');
+    failedCalls++;
+    throw new DOMException('fixture-key transport details', 'TimeoutError');
   };
   await assert.rejects(
-    collect({ out: failed, key: 'fixture-key', plan, fetchImpl: broken }),
+    collect({ out: failed, budgetFile: failedBudget, key: 'fixture-key', plan, fetchImpl: broken }),
     (e) => !e.message.includes('fixture-key') && /Transport/.test(e.message),
   );
   assert.equal((await readJson(join(failed, 'collection.json'))).attempts.length, 1);
+  assert.equal((await readJson(failedBudget)).attempts.length, failedCalls);
   await assert.rejects(
-    collect({ out: failed, key: 'fixture-key', plan, fetchImpl }),
+    collect({ out: failed, budgetFile: failedBudget, key: 'fixture-key', plan, fetchImpl: broken }),
     /aucun retry/,
   );
+  await unlink(join(failed, 'collection.json'));
+  await assert.rejects(
+    collect({
+      out: join(root, 'failed-other'),
+      budgetFile: failedBudget,
+      key: 'fixture-key',
+      plan,
+      fetchImpl: broken,
+    }),
+    /aucun retry/,
+  );
+  assert.equal(failedCalls, 1, 'Échec transport consommé même après changement de sortie');
+  const failuresBudget = await newBudget('thirty-failures');
+  let refusedCalls = 0;
+  const unavailable = async () => {
+    refusedCalls++;
+    return { ok: false, status: 503 };
+  };
+  for (let league = 1; league <= 30; league++) {
+    await assert.rejects(
+      collect({
+        out: join(root, 'failure-' + league),
+        budgetFile: failuresBudget,
+        key: 'fixture-key',
+        plan: { ...plan, leagues: [league], seasons: [2023] },
+        fetchImpl: unavailable,
+        wait: async () => {},
+      }),
+      /HTTP 503/,
+    );
+  }
+  await assert.rejects(
+    collect({
+      out: join(root, 'failure-31'),
+      budgetFile: failuresBudget,
+      key: 'fixture-key',
+      plan: { ...plan, leagues: [31], seasons: [2023] },
+      fetchImpl: unavailable,
+    }),
+    /Budget global/,
+  );
+  assert.equal(refusedCalls, 30, 'Trente refus 5xx épuisent également le budget global');
   const paginated = join(root, 'paginated');
   await assert.rejects(
     collect({
       out: paginated,
+      budgetFile: await newBudget('paginated'),
       key: 'fixture-key',
       plan,
       fetchImpl: async () => ({
@@ -285,11 +415,15 @@ try {
   const locked = join(root, 'locked');
   await externalDirectory(locked);
   await writeFile(join(locked, 'collect.lock'), '');
-  await assert.rejects(collect({ out: locked, plan, fetchImpl }), /verrou/);
+  await assert.rejects(
+    collect({ out: locked, budgetFile: await newBudget('locked'), plan, fetchImpl }),
+    /verrou/,
+  );
   const refused = join(root, 'refused');
   await assert.rejects(
     collect({
       out: refused,
+      budgetFile: await newBudget('refused'),
       key: 'fixture-key',
       plan,
       fetchImpl: async () => ({ ok: false, status: 429 }),
@@ -301,6 +435,7 @@ try {
   await assert.rejects(
     collect({
       out: providerError,
+      budgetFile: await newBudget('provider-error'),
       key: 'fixture-key',
       plan,
       fetchImpl: async () => ({
@@ -309,6 +444,87 @@ try {
       }),
     }),
     (e) => !e.message.includes('fixture-key') && /erreur/.test(e.message),
+  );
+  // Deux vrais processus, deux sorties, un seul registre ; on compte les fetch exécutés.
+  const concurrentBudget = await newBudget('concurrent');
+  const fetchLog = join(root, 'actual-fetches.log');
+  const workerPath = join(root, 'collect-worker.mjs');
+  await writeFile(
+    workerPath,
+    `
+    import assert from 'node:assert/strict';
+    import { appendFile, readFile } from 'node:fs/promises';
+    import { once } from 'node:events';
+    import { collect } from ${JSON.stringify(new URL('../scripts/backtest/collect.mjs', import.meta.url).href)};
+    const demo = JSON.parse(await readFile(new URL(${JSON.stringify(new URL('../tests/fixtures/backtest-demo.json', import.meta.url).href)}), 'utf8'));
+    const plan = ${JSON.stringify(plan)};
+    let calls = 0;
+    try {
+      await collect({ out: process.argv[2], key: 'fixture-key', plan, wait: async () => {},
+        fetchImpl: async (url) => {
+          const u = new URL(url);
+          const league = +u.searchParams.get('league'), season = +u.searchParams.get('season');
+          const budget = JSON.parse(await readFile(process.env.BACKTEST_BUDGET_FILE, 'utf8'));
+          assert(budget.attempts.some(a => a.id === league + '-' + season));
+          await appendFile(${JSON.stringify(fetchLog)}, 'fetch\\n');
+          if (++calls === 1) {
+            console.log('NETWORK_RESERVED');
+            await once(process.stdin, 'data');
+            process.stdin.pause();
+          }
+          const f = structuredClone(demo.fixtures[0]);
+          f.league.id = league; f.league.season = season; f.fixture.id = league * 10000 + season;
+          return { ok: true, json: async () => ({ errors: [], response: [f], results: 1, paging: { current: 1, total: 1 } }) };
+        }
+      });
+    } catch (error) { console.error(error.message); process.exitCode = 1; }
+  `,
+  );
+  const startWorker = (name) => {
+    let child;
+    const done = new Promise((resolve) => {
+      child = execFile(
+        process.execPath,
+        [workerPath, join(root, name)],
+        {
+          env: { ...process.env, BACKTEST_BUDGET_FILE: concurrentBudget },
+          timeout: 15000,
+        },
+        (error, stdout, stderr) => resolve({ error, stdout, stderr }),
+      );
+    });
+    return { child, done };
+  };
+  const first = startWorker('concurrent-a');
+  try {
+    await new Promise((resolve, reject) => {
+      first.child.stdout.on('data', (data) => {
+        if (String(data).includes('NETWORK_RESERVED')) resolve();
+      });
+      first.done.then(({ error }) => {
+        if (error) reject(error);
+      });
+    });
+    const second = startWorker('concurrent-b');
+    const refusedWorker = await second.done;
+    assert(refusedWorker.error && /budget verrouillé/.test(refusedWorker.stderr));
+    first.child.stdin.end('continue');
+    const finishedWorker = await first.done;
+    assert.equal(finishedWorker.error, null, finishedWorker.stderr);
+    assert.equal((await readFile(fetchLog, 'utf8')).trim().split('\n').length, 30);
+    const again = startWorker('concurrent-b');
+    const exhaustedWorker = await again.done;
+    assert(exhaustedWorker.error && /Budget global/.test(exhaustedWorker.stderr));
+    assert.equal(
+      (await readFile(fetchLog, 'utf8')).trim().split('\n').length,
+      30,
+      'Deux processus simultanés et nouvelle relance : au plus trente fetch réels',
+    );
+  } finally {
+    first.child.kill();
+  }
+  console.log(
+    'Budget réel simulé : relance=30, journal supprimé=30, autre --out=30, deux processus=30.',
   );
   const rendered = join(root, 'rendered');
   await writeReport(input, rendered);
