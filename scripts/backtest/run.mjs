@@ -14,7 +14,7 @@ import { runBacktest } from './engine.mjs';
 import { calibrationSvg, markdownReport } from './report.mjs';
 
 // `verified` : somme de collecte contrôlée (jeux historiques seulement).
-async function verifiedDataset(input) {
+export async function verifiedDataset(input) {
   const bytes = await readFile(input),
     dataset = JSON.parse(bytes);
   const verified = dataset.kind === 'historical';
