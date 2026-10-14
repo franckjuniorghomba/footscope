@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import {
+  NO_CANDIDATE_REASON,
   PREFERRED_BOOKMAKER,
   PREFERRED_TOLERANCE,
   selectCoupon,
@@ -11,7 +12,9 @@ import { POLICY } from '../src/server/policy.js';
 
 const now = Date.parse('2030-01-01T12:00:00Z');
 const timestamp = (offset = 0) => new Date(now + offset).toISOString();
-const event = (matchId, bookmaker, prudentProbability = 0.8) => ({
+// BIS-176 : base 0,95 (et non 0,8) pour que les tickets de quatre respectent le seuil de
+// probabilité combinée (0,8⁴ ≈ 0,41 < 0,5) même avec un écart de 80 % côté bet365.
+const event = (matchId, bookmaker, prudentProbability = 0.95) => ({
   matchId,
   bookmaker,
   prudentProbability,
@@ -28,7 +31,7 @@ const reportsFor = (ratio, count = 4, name = PREFERRED_BOOKMAKER) =>
     retrievedAt: timestamp(),
     events: [
       event(i + 1, 'Other'),
-      ...(i < count ? [event(i + 1, name, 0.8 * ratio ** 0.25)] : []),
+      ...(i < count ? [event(i + 1, name, 0.95 * ratio ** 0.25)] : []),
     ],
   }));
 function verifyWrapper(reports) {
@@ -91,6 +94,12 @@ const empty = {
   preferredBookmakerUsed: false,
   preferredBookmakerUnavailable: true,
   scoreGap: null,
+  ticketProbability: null,
+  ticketProbabilityExploratory: null,
+  minTicketProbability: POLICY.minTicketProbability,
+  noTicketReason: NO_CANDIDATE_REASON,
+  modelValidated: false,
+  realMoneyEligible: false,
 };
 assert.deepEqual(verifyWrapper([]), empty);
 for (const mutate of [
