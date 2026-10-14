@@ -49,6 +49,68 @@ export function statisticalSummary(result) {
   return 'Analyse statistique terminée ; explication LLM indisponible.';
 }
 
+// BIS-182 : contrôle a posteriori des chiffres écrits par le LLM. Il porte sur la réponse
+// seule : ni l'entrée, ni le prompt, ni le dossier de preuves ne changent.
+// Règles :
+// - « 64,8 % », « 64.8% », « 65 pour cent » : pourcentage, comparé en fraction (0,648) ;
+// - « 0,65 », « 1.80 » : décimal, comparé tel quel ;
+// - un entier sans « % » (« 2 sélections », « 4 matchs », dates) n'est pas contrôlé ;
+// - le signe est ignoré (« écart de −3 % » se compare à 0,03).
+// Un nombre est accepté s'il arrondit une valeur transmise au LLM, à une demi-unité près
+// du dernier chiffre écrit : 64,8 % accepte « 65 % » et « 64,8 % », refuse « 64 % » et
+// « 72 % ». Un calcul que le serveur n'a pas fourni (complément, produit) est refusé :
+// le repli statistique est plus prudent. Limite : le contrôle vérifie qu'un chiffre
+// existe parmi les valeurs du serveur, pas à quelle grandeur le texte l'attribue.
+const NUMBER_PATTERN =
+  /(?<![\p{L}\p{N}_.,])(\d+)(?:[.,](\d+))?(?!\p{N})(?:[\s\u00a0\u202f]*(%|pour\s*cent|percent))?/giu;
+
+function readNumbers(text) {
+  return [...String(text).matchAll(NUMBER_PATTERN)].map(([, whole, fraction = '', percent]) => {
+    const scale = percent ? 100 : 1;
+    return {
+      value: Number(whole + '.' + (fraction || '0')) / scale,
+      tolerance: (0.5 * 10 ** -fraction.length) / scale,
+      percent: !!percent,
+      integer: !fraction && !percent,
+    };
+  });
+}
+
+// Nombres contrôlés d'un texte du LLM : pourcentages et décimaux, sans les entiers nus.
+export const extractNumbers = (text) => readNumbers(text).filter((n) => !n.integer);
+
+// Références : tous les nombres transmis au LLM, y compris dans les textes du serveur.
+// Un pourcentage ne se compare qu'aux probabilités et avantages (clés « probability »,
+// « edge ») et aux pourcentages déjà écrits par le serveur : un identifiant de match 1
+// ne justifie pas « 100 % ».
+function collectReferences(value, refs, isRate = false) {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return;
+    refs.all.push(Math.abs(value));
+    if (isRate) refs.rates.push(Math.abs(value));
+  } else if (typeof value === 'string') {
+    for (const { value: number, percent } of readNumbers(value)) {
+      refs.all.push(number);
+      if (percent || isRate) refs.rates.push(number);
+    }
+  } else if (Array.isArray(value)) {
+    for (const item of value) collectReferences(item, refs, isRate);
+  } else if (value && typeof value === 'object')
+    for (const [key, item] of Object.entries(value))
+      collectReferences(item, refs, isRate || /probability|edge/i.test(key));
+}
+
+export function checkLlmNumbers(texts, input) {
+  const refs = { all: [], rates: [] };
+  collectReferences(input, refs);
+  const numbers = texts.flatMap(extractNumbers);
+  const mismatches = numbers.filter(
+    ({ value, tolerance, percent }) =>
+      !(percent ? refs.rates : refs.all).some((r) => Math.abs(r - value) <= tolerance + 1e-9),
+  ).length;
+  return { checked: numbers.length, mismatches };
+}
+
 export async function llmExplanation(env, result) {
   if (!env.OPENAI_API_KEY || !env.LLM_MODEL)
     return {
@@ -111,6 +173,12 @@ export async function llmExplanation(env, result) {
       .map((x) => String(x).slice(0, 500)),
     risks: (Array.isArray(p.risks) ? p.risks : []).slice(0, 8).map((x) => String(x).slice(0, 500)),
   };
+  const check = checkLlmNumbers([value.summary, ...value.reasons, ...value.risks], input);
+  if (check.mismatches) {
+    // Journal sans le texte du LLM : seulement des compteurs.
+    console.warn(JSON.stringify({ event: 'llm_number_mismatch', model: env.LLM_MODEL, ...check }));
+    return { engine: 'statistics', summary: statisticalSummary(result) };
+  }
   llmCalls.set(cacheKey, { at: Date.now(), value });
   if (llmCalls.size > 100) llmCalls.delete(llmCalls.keys().next().value);
   return value;
