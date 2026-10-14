@@ -1,4 +1,5 @@
 import { POLICY, MODEL_VERSION } from './policy.js';
+import { marketReference } from './market.js';
 
 export function distribution(lambda) {
   const p = [Math.exp(-lambda)];
@@ -157,5 +158,6 @@ export function assessMatch(d, now = Date.now()) {
     retrievedAt: d.retrievedAt,
     modelVersion: MODEL_VERSION,
     modelValidated: false,
+    market: marketReference(d.odds, now),
   };
 }
