@@ -64,9 +64,10 @@ refusals[0].teams.home.name +=
   env.API_RELAY_TOKEN;
 refusals[0].fixture.identity = 'private-person-sentinel';
 let fixtures = refusals;
+// BIS-217 : le refus de fraîcheur du match 4 exige désormais plus de 3 h.
 const odds = (id) => ({
   fixture: { id },
-  update: new Date(id === 4 ? now - 3600000 : now).toISOString(),
+  update: new Date(id === 4 ? now - 181 * 60000 : now).toISOString(),
   bookmakers: [
     {
       name: id === 106 ? 'Book B' : 'Book A',

@@ -220,6 +220,24 @@ assert.deepEqual(
   [3],
 );
 
+// BIS-217 : la route accepte 2 h 59 et conserve updated pour tous les candidats.
+const aged = await proposed([
+  report(1, [event(1, 0.9, { updated: timestamp(-179 * 60000) })]),
+  report(2, [event(2, 0.72, { updated: timestamp(-179 * 60000) })]),
+  report(3, [event(3, 0.72, { updated: timestamp(-179 * 60000) })]),
+  report(4, [event(4, 0.7, { updated: timestamp(-181 * 60000) })]),
+]);
+assert.deepEqual(
+  aged.selections.map((e) => e.matchId),
+  [1, 2],
+);
+assert.deepEqual(
+  aged.excludedCandidates.map((e) => e.matchId),
+  [3],
+);
+assert(aged.market.checks.every((c) => c.updated === timestamp(-179 * 60000)));
+assert.equal(aged.realMoneyEligible, false);
+
 // Produit exactement au seuil : 1 × 0,8 × 0,625 = 0,5, accepté.
 const exact = await proposed(universe([1, 0.8, 0.625]));
 assert.equal(exact.selections.length, 3);

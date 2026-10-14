@@ -64,8 +64,27 @@ assert.deepEqual(
   report.model,
   'Future outcomes must not leak into forecast',
 );
-changed.odds[0].update = new Date(now - 3600000).toISOString();
-assert.equal(mod.assessMatch(changed, now).events[0].status, 'reject');
+// BIS-217 : l'ancien refus à 1 h devient une admission ; tester la nouvelle frontière.
+for (const minutes of [60, 179, 180]) {
+  changed.odds[0].update = new Date(now - minutes * 60000).toISOString();
+  const result = mod.assessMatch(changed, now);
+  assert.equal(result.events[0].status, 'simulation_eligible');
+  assert.equal(mod.selectCoupon([result], now).length, 1);
+  assert.equal(result.modelValidated, false);
+  assert.equal(result.events[0].realMoneyEligible, false);
+}
+for (const updated of [
+  new Date(now - 181 * 60000).toISOString(),
+  undefined,
+  'invalid',
+  new Date(now + 300001).toISOString(),
+]) {
+  changed.odds[0].update = updated;
+  const result = mod.assessMatch(changed, now);
+  assert.equal(result.events[0].status, 'reject');
+  assert(result.events[0].reasons.includes('Cote absente, future ou âgée de plus de 3 heures.'));
+  assert.equal(mod.selectCoupon([result], now).length, 0);
+}
 changed.odds[0].update = new Date(now).toISOString();
 changed.fixture.fixture.timestamp = Math.floor((now + 300000) / 1000);
 assert(mod.assessMatch(changed, now).events[0].reasons.some((x) => x.includes('Compositions')));
@@ -169,6 +188,52 @@ assert.equal(review.realMoneyEligible, false);
 assert.equal(review.engine, 'llm');
 assert.equal(review.selections.length, 0, 'LLM cannot add selections');
 assert.equal(llmRequest.store, false);
+// BIS-217 : contrat HTTP scan/review aux deux côtés de la nouvelle frontière.
+// La cote client falsifiée reste ignorée, y compris pour une cote ancienne admissible.
+for (const minutes of [179, 181]) {
+  data.odds[0].update = new Date(now - minutes * 60000).toISOString();
+  // Isolat et stockage neufs : éviter de relire le cache du relevé précédent.
+  const agedWorker = (
+    await import(
+      'data:text/javascript;base64,' +
+        Buffer.from(source + '\n// age ' + minutes).toString('base64')
+    )
+  ).default;
+  const agedCall = (action, body) =>
+    agedWorker.fetch(
+      new Request('https://site/api/assistant/' + action, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+      { ...env, BUCKET: undefined },
+    );
+  const agedScan = await (await agedCall('scan', { matchId: 99 })).json();
+  const agedReview = await (
+    await agedCall('review', {
+      tokens: [agedScan.token],
+      selections: [
+        {
+          matchId: 99,
+          market: 'Goals Over/Under',
+          selection: 'Over 0.5',
+          bookmaker: 'Book',
+          odd: 99,
+          updated: new Date(now).toISOString(),
+        },
+      ],
+    })
+  ).json();
+  assert.equal(agedReview.verdict, minutes === 179 ? 'simulation_eligible' : 'reject');
+  assert.equal(agedReview.reviews[0].updated, data.odds[0].update);
+  assert.equal(agedReview.reviews[0].odd, 1.8);
+  assert.equal(agedReview.realMoneyEligible, false);
+  if (minutes === 181)
+    assert(
+      agedReview.reviews[0].reasons.includes('Cote absente, future ou âgée de plus de 3 heures.'),
+    );
+}
+data.odds[0].update = new Date(now).toISOString();
 const corrupt = {
   ...scanned.token,
   payload: scanned.token.payload.replace('Over 0.5', 'Over 4.5'),
@@ -190,10 +255,23 @@ assert.equal(duplicate.verdict, 'reject');
 const missing = await (
   await call('review', {
     tokens: [],
-    selections: [{ matchId: 99, market: 'Player Shots', selection: 'Over 3', bookmaker: 'Book' }],
+    selections: [
+      {
+        matchId: 99,
+        market: 'Player Shots',
+        selection: 'Over 3',
+        bookmaker: 'Book',
+        updated: new Date(now).toISOString(),
+      },
+    ],
   })
 ).json();
 assert.equal(missing.verdict, 'insufficient');
+assert.equal(
+  missing.reviews[0].updated,
+  null,
+  'Une sélection absente ne reprend jamais l’heure client',
+);
 const date = new Date(Date.parse(target.fixture.date) - 5 * 3600000).toISOString().slice(0, 10);
 const proposed = await (
   await call('propose', { tokens: [scanned.token], scope: { date }, eligibleCount: 1 })

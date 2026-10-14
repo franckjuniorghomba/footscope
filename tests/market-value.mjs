@@ -118,10 +118,10 @@ const refused = (event, reference, code) => {
 const mw = bet('Match Winner', 'Home', 2.1);
 refused(mw, null, 'NO_REFERENCE');
 refused(mw, undefined, 'NO_REFERENCE');
-refused(mw, pinnacle({ updated: at(-POLICY.maxOddsAgeMs - 1) }), 'STALE_REFERENCE');
+refused(mw, pinnacle({ updated: at(-POLICY.maxMarketOddsAgeMs - 1) }), 'STALE_REFERENCE');
 refused(mw, pinnacle({ updated: at(300001) }), 'STALE_REFERENCE');
 refused(mw, pinnacle({ updated: 'invalid' }), 'STALE_REFERENCE');
-refused({ ...mw, updated: at(-POLICY.maxOddsAgeMs - 1) }, pinnacle(), 'STALE_QUOTE');
+refused({ ...mw, updated: at(-POLICY.maxMarketOddsAgeMs - 1) }, pinnacle(), 'STALE_QUOTE');
 refused({ ...mw, updated: undefined }, pinnacle(), 'STALE_QUOTE');
 refused(mw, pinnacle({ matchId: 8 }), 'OTHER_MATCH');
 refused({ ...mw, bookmaker: 'Unibet' }, pinnacle(), 'NOT_BET365');
@@ -152,8 +152,12 @@ for (const mutate of [
   mutate(reference);
   refused(bet('Both Teams Score', 'Yes', 1.9), reference, 'INCOMPLETE_MARKET');
 }
-// Bornes de fraîcheur identiques aux événements : 30 minutes, futur toléré 5 minutes.
-for (const offset of [-POLICY.maxOddsAgeMs, 300000])
+// BIS-217 : badge toujours à 30 min malgré l’admission à 3 h.
+refused({ ...mw, updated: at(-179 * 60000) }, pinnacle(), 'STALE_QUOTE');
+refused(mw, pinnacle({ updated: at(-179 * 60000) }), 'STALE_REFERENCE');
+
+// Bornes propres au repère descriptif : 30 minutes, futur toléré 5 minutes.
+for (const offset of [-POLICY.maxMarketOddsAgeMs, 300000])
   assert.equal(marketValue(mw, pinnacle({ updated: at(offset) }), now).reasonCode, null);
 
 // Relevé Pinnacle extrait des cotes du match, sans muter l'entrée.
@@ -514,6 +518,11 @@ const { runInNewContext } = await import('node:vm');
 const ui = await readFile(new URL('../src/web/app.js', import.meta.url), 'utf8');
 const box = { classList: { remove() {} }, innerHTML: '' };
 const ctx = {
+  Date: class extends Date {
+    static now() {
+      return now;
+    }
+  },
   $: (q) => (q === '#assistantResult' ? box : null),
   kickoff: () => '',
   crest: () => '',
@@ -523,6 +532,11 @@ runInNewContext(
     ui.slice(ui.indexOf('function verdictLabel('), ui.indexOf('let assistantBusy')),
   ctx,
 );
+runInNewContext(ui.slice(ui.indexOf('function fresh('), ui.indexOf('async function get(')), ctx);
+assert.equal(ctx.fresh(at(-179 * 60000)), true);
+assert.equal(ctx.fresh(at(-180 * 60000)), true);
+assert.equal(ctx.fresh(at(-181 * 60000)), false);
+assert.equal(ctx.fresh('invalid'), false);
 const render = (d) => {
   ctx.showAssistant(d);
   return box.innerHTML;
@@ -532,6 +546,12 @@ const count = (html, re) => (html.match(re) || []).length;
 let html = render(many);
 assert.equal(count(html, /class="valuebadge"/g), 2 + 2 + 7);
 assert(html.includes('Candidats écartés (7)'));
+assert.equal(count(html, /class="oddsage"/g), 2 + 2 + 7);
+assert.equal(ctx.oddsAge(at(-179 * 60000)), 'cote mise à jour il y a 2 h 59 min');
+assert.equal(ctx.oddsAge(at(-59000)), 'cote mise à jour il y a 0 min');
+assert.equal(ctx.oddsAge(undefined), 'Âge de la cote indisponible');
+assert.equal(ctx.oddsAge('invalid'), 'Âge de la cote indisponible');
+assert.equal(ctx.oddsAge(at(60000)), 'Horodatage de la cote dans le futur');
 for (const id of [9, 10, 11, 12, 13, 14, 15]) assert(html.includes('Club ' + id + ' — '), id);
 assert(html.includes('Pas de repère Pinnacle'), 'Raison du candidat sans repère');
 
@@ -564,6 +584,7 @@ assert(!html.includes('Candidats écartés'));
 // Le check manquant n'a repris aucune donnée du client (cote 50 non comparée).
 assert.equal(reviewed.market.checks[1].index, 1);
 assert.equal(reviewed.market.checks[1].odd, null);
+assert.equal(reviewed.market.checks[1].updated, null);
 assert.equal(reviewed.market.checks[1].marketName, null);
 assert.equal(
   ctx.valueCheck(reviewed.market, 'review', 1, reviewed.reviews[1]).reasonCode,

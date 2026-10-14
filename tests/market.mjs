@@ -58,7 +58,7 @@ for (const mutate of [
   (r) => (values(r)[1] = null),
   (r) => (r[0].update = 'invalid'),
   (r) => (r[0].update = null),
-  (r) => (r[0].update = new Date(now - POLICY.maxOddsAgeMs - 1).toISOString()),
+  (r) => (r[0].update = new Date(now - POLICY.maxMarketOddsAgeMs - 1).toISOString()),
   (r) => (r[0].update = new Date(now + 300001).toISOString()),
   (r) => (r[0].bookmakers[0].name = ''),
   (r) => (r[0].bookmakers[0].bets[0].values = null),
@@ -68,7 +68,7 @@ for (const mutate of [
   mutate(r);
   assert.deepEqual(marketReference(r, now), []);
 }
-for (const age of [POLICY.maxOddsAgeMs, -300000]) {
+for (const age of [POLICY.maxMarketOddsAgeMs, -300000]) {
   const r = records();
   r[0].update = new Date(now - age).toISOString();
   assert.equal(marketReference(r, now).length, 1);
