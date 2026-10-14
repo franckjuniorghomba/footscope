@@ -8,12 +8,14 @@ L’exécution publique est un Cloudflare Worker. Node.js sert au développement
 2. `jobs.js` parcourt les cotes paginées. Pour vingt matchs ou moins, il collecte les cotes par match ; pour un périmètre plus large, il parcourt les deux dates UTC nécessaires.
 3. Chaque match reçoit soit un motif d’exclusion, soit une analyse approfondie de ses preuves.
 4. `statistics.js` estime les événements pris en charge et applique `policy.js`.
-5. `coupon.js` compare les événements admissibles, retient un événement par match et classe les combinaisons possibles par bookmaker.
+5. `coupon.js` compare les événements admissibles, retient un événement par match et compose les tickets par bookmaker : le produit des probabilités prudentes doit rester supérieur ou égal à 0,5, avec quatre sélections maximum. Le choix entre bookmakers conserve les règles de classement et de préférence existantes.
 6. Les matchs envisagés sont revérifiés. Aucun coupon complet n’est présenté tant qu’il manque des examens.
-7. `llm.js` explique le verdict calculé. Les informations retournées ne peuvent pas changer les sélections ou le statut.
-8. `storage.js` conserve les propositions et permet le relevé des résultats.
+7. `assistant.js` transmet les probabilités combinées prudente et exploratoire, le seuil et les candidats dont l’ajout ferait passer sous le seuil. `llm.js` explique pourquoi ces sélections et pourquoi pas plus, sans inventer de chiffres ni changer le ticket ou le statut. Le prompt et la projection de l’entrée sont partagés avec `jobs.js` pour conserver exactement la requête dans le dossier de preuves. Le repère descriptif `market` sans marge est exclu de l’entrée ; les noms textuels des marchés sont conservés. Sans LLM disponible, le résumé rappelle la probabilité prudente combinée et le caractère non validé du modèle.
+8. La proposition fige `ticketProbability`, `combinedProbability = ticketProbability` et `modelVersion = MODEL_VERSION` dans l’observation. `storage.js` conserve les propositions et permet le relevé des résultats ; le suivi par ticket compare la probabilité annoncée enregistrée à l’observé sans la recalculer.
 
 ## Données et isolation
+
+`statistics.js` ajoute un tableau descriptif `market`, calculé par `market.js` sur les cotes déjà collectées. Chaque entrée décrit un 1X2 (`Match Winner`) complet d'un même bookmaker et relevé : `odds`, `probabilities`, `overround`, `updated`, `method: proportional` et une explication de la marge. La marge implicite vaut `somme(1/cote) - 1` et les probabilités `(1/cote) / somme(1/cote)` (somme vérifiée à 1e-9 près). Il faut exactement Home/Draw/Away avec des cotes finies supérieures à 1 et un relevé âgé au plus de 30 minutes (futur toléré jusqu'à 5 minutes, comme les événements). Aucun assemblage de relevés ou bookmakers, aucune normalisation Double Chance ; tableau vide sans marché valide. Ce champ ne participe ni aux verdicts ni au ticket et est exclu de la projection LLM partagée avec le dossier de preuves. L'affichage relève de BIS-175 ; aucun appel fournisseur supplémentaire.
 
 Les préfixes R2 `api-cache/`, `api-control/`, `jobs/`, `observations/` et `latest/` ont des rôles distincts. Les analyses sont associées à l’identité fournie par l’hébergement. Le jeton d’accès de service ne contient pas d’identité visiteur ; il suit un parcours séparé sur le site privé.
 

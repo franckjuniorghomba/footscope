@@ -5,143 +5,226 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta
       name="description"
-      content="FootScope : données football récentes, comparaison des cotes et coupon de simulation."
+      content="Footscope : comprendre le match avant le coup d’envoi. Données football, comparaison des cotes et ticket de simulation."
     />
-    <title>FootScope — Matchday</title>
+    <meta name="theme-color" content="#050c15" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23050c15'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%2398fa5f' stroke-width='2.5'/%3E%3Cpath d='M16 3v6M16 23v6M3 16h6M23 16h6' stroke='%2398fa5f' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E"
+    />
+    <title>Footscope — Comprendre le match</title>
+    <link
+      rel="preload"
+      href="/assets/fonts/barlow-latin-400-normal.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/assets/fonts/outfit-latin-800-normal.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
   <body>
-    <header>
-      <a href="/" class="brand"><span class="mark">↗</span>FOOTSCOPE.</a>
-      <nav>
-        <button data-view="today" class="active">Le programme</button
-        ><button data-view="journal">Mon suivi</button
-        ><button data-view="method">La méthode</button>
+    <a class="skip" href="#main">Aller au contenu</a>
+    <header class="site">
+      <a href="/" class="brand"
+        ><svg class="brandmark" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="9" />
+          <path d="M16 3v6M16 23v6M3 16h6M23 16h6" />
+          <circle class="core" cx="16" cy="16" r="2.5" /></svg
+        >Footscope</a
+      >
+      <nav aria-label="Vues">
+        <button data-view="today" class="active" aria-current="page">Analyses</button
+        ><button data-view="method">Méthode</button><button data-view="journal">Historique</button>
       </nav>
-      <span class="pill"
-        ><span class="dot">●</span><span id="connection">Connexion en cours</span></span
+      <span class="pill" id="connectionPill"
+        ><span class="dot" aria-hidden="true"></span
+        ><span id="connection">Connexion en cours</span></span
       >
     </header>
-    <main>
-      <section class="hero">
-        <div>
-          <span class="eyebrow">FOOTBALL / ANALYSE DES MARCHÉS</span>
-          <h1>MATCH<em>DAY.</em></h1>
-          <p>
-            Les matchs, les stats et les cotes. Examine chaque marché avant de composer ta
-            sélection.
-          </p>
-        </div>
-        <div>
-          <div class="field" aria-hidden="true">
-            <div class="pitch"></div>
-            <div class="ball"></div>
-            <small>FOOTBALL DATA / GMT−5</small>
-          </div>
-          <p class="note">API-Football · GMT−5<br />Chaque cote conserve son horodatage.</p>
-        </div>
-      </section>
-      <section class="facts">
-        <div class="fact"><strong id="count">—</strong><span>matchs au programme</span></div>
-        <div class="fact">
-          <strong id="oddsCount">—</strong><span>matchs avec cotes chargées</span>
-        </div>
-        <div class="fact"><strong>04</strong><span>sélections maximum</span></div>
-        <div class="fact"><strong id="quota">—</strong><span>quota quotidien</span></div>
-      </section>
-      <div id="status" class="status" role="status"></div>
+    <main id="main">
       <section id="today">
-        <div class="toolbar">
-          <input aria-label="Date des matchs" type="date" id="date" /><input
-            aria-label="Chercher une équipe"
-            type="search"
-            id="search"
-            placeholder="Chercher une équipe…"
-          /><select id="country" aria-label="Pays">
-            <option value="">Tous les pays</option></select
-          ><select id="league" aria-label="Championnat">
-            <option value="">Tous les championnats</option></select
-          ><label class="note"><input type="checkbox" id="onlyOdds" /> Avec cotes</label
-          ><button class="btn" id="refresh">Actualiser</button>
-        </div>
-        <div class="layout">
-          <div>
-            <div class="notice">
-              Version d’observation. Les cotes sont réelles ; les probabilités du modèle ne sont pas
-              encore validées. Aucun pronostic automatique n’est présenté comme fiable.
+        <div class="hero">
+          <div class="herotext">
+            <p class="eyebrow">Le football, éclairé par les données</p>
+            <h1>Comprendre le match. <span>Avant le coup d’envoi.</span></h1>
+            <p class="lead">
+              Explorez les statistiques, comparez les scénarios et testez vos analyses en
+              simulation.
+            </p>
+            <div class="cta">
+              <a class="btn primary" href="#rencontres"
+                >Explorer les analyses <span aria-hidden="true">→</span></a
+              ><button class="btn secondary" id="seeMethod" type="button">Voir la méthode</button>
             </div>
-            <div class="assistantbox">
-              <div>
-                <span class="eyebrow">ASSISTANT / COUPON</span>
-                <p class="note" id="assistantState">Vérification de la connexion LLM…</p>
-              </div>
-              <button id="propose" class="btn orange">Analyser tous les matchs filtrés</button>
-            </div>
-            <div id="assistantResult" class="panel hidden" role="status"></div>
-            <div id="details" class="hidden"></div>
-            <div id="program">
-              <div class="sectiontitle">
-                <h2>Le programme du jour</h2>
-                <span class="eyebrow" id="visibleCount"></span>
-              </div>
-              <div id="matches" class="loader">Chargement du programme…</div>
-              <div class="pagination">
-                <button id="prevMatches" class="btn light" aria-label="Page précédente">
-                  ← Précédent</button
-                ><span id="matchPage" class="eyebrow">1 / 1</span
-                ><button id="nextMatches" class="btn light" aria-label="Page suivante">
-                  Suivant →
-                </button>
-              </div>
-              <button class="btn light hidden" id="more">Charger davantage de cotes</button>
-            </div>
+            <ul class="trust">
+              <li>
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <ellipse cx="12" cy="5" rx="9" ry="3" />
+                  <path d="M3 5v14a9 3 0 0 0 18 0V5" />
+                  <path d="M3 12a9 3 0 0 0 18 0" /></svg
+                >Sources visibles
+              </li>
+              <li>
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M20 13c0 5-3.5 7.5-7.7 9a1 1 0 0 1-.6 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.2-2.7a1.2 1.2 0 0 1 1.6 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1z"
+                  />
+                  <path d="m9 12 2 2 4-4" /></svg
+                >Incertitude expliquée
+              </li>
+              <li>
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+                  <path d="M18 17V9M13 17V5M8 17v-3" /></svg
+                >Mode simulation
+              </li>
+            </ul>
           </div>
-          <aside class="coupon">
-            <div class="couponhead">
-              <h2>Mon coupon</h2>
-              <span id="slots">0 / 4</span>
+          <section class="ticket" aria-labelledby="ticketTitle">
+            <div class="tickethead">
+              <h2 id="ticketTitle" class="eyebrow">Ticket du jour</h2>
+              <span class="chip">Simulation · modèle non validé</span>
             </div>
-            <div class="couponbody">
-              <span class="eyebrow">Simulation uniquement</span>
-              <div id="couponItems"></div>
-              <div class="total"><span>Cote combinée</span><strong id="combined">—</strong></div>
-              <label class="note" for="stake">Mise fictive (CAD)</label
-              ><input id="stake" type="number" min="0" max="100000" step="1" value="10" />
-              <div class="total">
-                <span>Retour potentiel, mise incluse</span><b id="return">—</b>
-              </div>
-              <p class="note">
-                La probabilité du combiné n’est pas calculée : les dépendances et la calibration
-                restent à valider. Les cotes peuvent changer.
+            <div id="assistantResult" class="ticketbody hidden" role="status"></div>
+            <div class="ticketempty">
+              <p class="tickettitle">Le ticket du jour apparaît ici après l’analyse.</p>
+              <p>
+                Tous les matchs du programme filtré sont examinés. Aucun ticket n’est proposé si
+                aucun événement ne passe les filtres : ne pas jouer reste une issue normale.
               </p>
-              <button class="btn light" id="review" style="width: 100%; margin-bottom: 10px">
-                Examiner mon coupon
-              </button>
-              <div id="couponReview" class="note" role="status" style="margin-bottom: 12px"></div>
-              <button class="btn orange" id="save" style="width: 100%">
-                Enregistrer la simulation
-              </button>
             </div>
-          </aside>
+            <div class="ticketactions">
+              <button id="propose" class="btn primary">Analyser les matchs filtrés</button>
+              <p class="note" id="assistantState">Vérification de la connexion LLM…</p>
+            </div>
+          </section>
         </div>
+        <section class="facts" aria-label="Le programme en chiffres">
+          <div class="fact"><strong id="count">—</strong><span>matchs au programme</span></div>
+          <div class="fact">
+            <strong id="oddsCount">—</strong><span>matchs avec cotes chargées</span>
+          </div>
+          <div class="fact"><strong>4</strong><span>sélections maximum</span></div>
+          <div class="fact">
+            <strong id="quota">—</strong><span>requêtes API-Football par jour</span
+            ><span class="factnote hidden" id="providerPlan"></span>
+          </div>
+        </section>
+        <section id="rencontres" class="rencontres" aria-labelledby="programTitle">
+          <div class="sectionhead">
+            <div>
+              <p class="eyebrow">Programme · GMT−5</p>
+              <h2 id="programTitle" tabindex="-1">Prochaines rencontres</h2>
+            </div>
+            <span class="meta" id="visibleCount"></span>
+          </div>
+          <div class="toolbar">
+            <input aria-label="Date des matchs" type="date" id="date" /><input
+              aria-label="Chercher une équipe"
+              type="search"
+              id="search"
+              placeholder="Chercher une équipe…"
+            /><select id="country" aria-label="Pays">
+              <option value="">Tous les pays</option></select
+            ><select id="league" aria-label="Championnat">
+              <option value="">Tous les championnats</option></select
+            ><label class="check"><input type="checkbox" id="onlyOdds" /> Avec cotes</label
+            ><button class="btn secondary" id="refresh">Actualiser</button>
+          </div>
+          <div id="status" class="status" role="status"></div>
+          <div class="layout">
+            <div class="maincol">
+              <p class="notice">
+                Version d’observation. Les cotes sont réelles ; les probabilités du modèle ne sont
+                pas encore validées. Aucun pronostic automatique n’est présenté comme fiable.
+              </p>
+              <div id="details" class="hidden"></div>
+              <div id="program">
+                <div id="matches" class="matchgrid">
+                  <div class="loader">Chargement du programme…</div>
+                </div>
+                <div class="pagination">
+                  <button
+                    id="prevMatches"
+                    class="btn secondary"
+                    aria-label="Page précédente"
+                    disabled
+                  >
+                    ← Précédent</button
+                  ><span id="matchPage" class="meta">PAGE 1 / 1</span
+                  ><button
+                    id="nextMatches"
+                    class="btn secondary"
+                    aria-label="Page suivante"
+                    disabled
+                  >
+                    Suivant →
+                  </button>
+                </div>
+                <button class="btn secondary hidden" id="more">Charger davantage de cotes</button>
+              </div>
+            </div>
+            <aside class="coupon" aria-labelledby="couponTitle">
+              <div class="couponhead">
+                <h2 id="couponTitle">Mon coupon</h2>
+                <span class="chip" id="slots">0 / 4</span>
+              </div>
+              <div class="couponbody">
+                <p class="eyebrow">Composé par vous · simulation uniquement</p>
+                <div id="couponItems"></div>
+                <div class="total"><span>Cote combinée</span><strong id="combined">—</strong></div>
+                <label class="fieldlabel" for="stake">Mise fictive (CAD)</label
+                ><input id="stake" type="number" min="0" max="100000" step="1" value="10" />
+                <div class="total">
+                  <span>Retour potentiel, mise incluse</span><b id="return">—</b>
+                </div>
+                <p class="note" id="couponProbability">
+                  Coupon manuel : Footscope ne calcule pas sa probabilité, car la dépendance entre
+                  les matchs et la calibration restent à valider. Les cotes peuvent changer.
+                </p>
+                <button class="btn secondary block" id="review">Examiner mon coupon</button>
+                <div id="couponReview" class="note" role="status"></div>
+                <button class="btn primary block" id="save">Enregistrer la simulation</button>
+              </div>
+            </aside>
+          </div>
+        </section>
       </section>
-      <section id="journal" class="hidden">
-        <h2 class="bigtitle">JOURNAL DES SÉLECTIONS.</h2>
-        <p class="note">
+      <section id="journal" class="hidden page" aria-labelledby="journalTitle">
+        <p class="eyebrow">Historique · simulations</p>
+        <h2 class="pagetitle" id="journalTitle">Vos simulations, sans promesse.</h2>
+        <p class="pagelead">
           Suivi local dans ce navigateur. Résultats saisis manuellement ; aucune vérification
           automatique. Ce suivi ne valide pas un modèle.
         </p>
-        <div class="panel">
-          <div id="performance" class="notice">Chargement du suivi serveur…</div>
+        <div class="card">
+          <h3>Suivi des propositions serveur</h3>
+          <div id="performance" class="perf">Chargement du suivi serveur…</div>
+        </div>
+        <div class="card">
+          <h3>Mes simulations enregistrées</h3>
           <div id="journalList"></div>
-          <button id="export" class="btn light">Exporter mon suivi en JSON</button>
+          <button id="export" class="btn secondary">Exporter mon suivi en JSON</button>
         </div>
       </section>
-      <section id="method" class="hidden method">
-        <h2 class="bigtitle">COMPRENDRE LES COTES.</h2>
+      <section id="method" class="hidden page method" aria-labelledby="methodTitle">
+        <p class="eyebrow">La méthode</p>
+        <h2 class="pagetitle" id="methodTitle" tabindex="-1">Comprendre les cotes.</h2>
         <div class="grid">
-          <div class="panel">
-            <span class="eyebrow">01 / Comparer</span>
+          <div class="card feature">
+            <span class="ring" aria-hidden="true"
+              ><svg class="icon" viewBox="0 0 24 24">
+                <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+                <path d="M18 17V9M13 17V5M8 17v-3" /></svg
+            ></span>
+            <p class="eyebrow">01 · Comparer</p>
             <h3>Probabilité ≠ rentabilité</h3>
             <p>
               Pour un pari sans remboursement, le seuil de rentabilité est 1 ÷ cote. L’espérance par
@@ -165,13 +248,16 @@
                   value="60"
               /></label>
             </div>
-            <p id="calcResult"></p>
+            <p id="calcResult" class="calcresult" role="status"></p>
             <p class="note">
               Calcul pédagogique sur une hypothèse personnelle. Ce n’est pas une recommandation.
             </p>
           </div>
-          <div class="panel">
-            <span class="eyebrow">02 / Filtrer</span>
+          <div class="card feature">
+            <span class="ring" aria-hidden="true"
+              ><svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18M7 12h10M10 18h4" /></svg
+            ></span>
+            <p class="eyebrow">02 · Filtrer</p>
             <h3>Les garde-fous</h3>
             <p>
               Données récentes et suffisantes. Compositions confirmées pour les joueurs. Cotes
@@ -184,8 +270,14 @@
               pas une garantie de fraîcheur.
             </p>
           </div>
-          <div class="panel">
-            <span class="eyebrow">03 / Observer</span>
+          <div class="card feature">
+            <span class="ring" aria-hidden="true"
+              ><svg class="icon" viewBox="0 0 24 24">
+                <path
+                  d="M22 12h-2.5a2 2 0 0 0-1.9 1.5l-2.4 8.3a.3.3 0 0 1-.4 0L9.2 2.2a.3.3 0 0 0-.4 0l-2.4 8.3A2 2 0 0 1 4.5 12H2"
+                /></svg
+            ></span>
+            <p class="eyebrow">03 · Observer</p>
             <h3>Un premier modèle exploratoire</h3>
             <p>
               Les moyennes de buts des dix derniers matchs terminés avant le coup d’envoi alimentent
@@ -197,8 +289,15 @@
               adaptés.
             </p>
           </div>
-          <div class="panel">
-            <span class="eyebrow">04 / Protéger</span>
+          <div class="card feature">
+            <span class="ring" aria-hidden="true"
+              ><svg class="icon" viewBox="0 0 24 24">
+                <path
+                  d="M20 13c0 5-3.5 7.5-7.7 9a1 1 0 0 1-.6 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.2-2.7a1.2 1.2 0 0 1 1.6 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1z"
+                />
+                <path d="m9 12 2 2 4-4" /></svg
+            ></span>
+            <p class="eyebrow">04 · Protéger</p>
             <h3>Choisir de ne pas jouer</h3>
             <p>
               Une cote basse peut rester un mauvais prix. Un combiné réduit la probabilité de tout
@@ -214,8 +313,8 @@
           </div>
         </div>
       </section>
-      <footer>
-        <span>FOOTSCOPE / MATCHDAY · GMT−5</span
+      <footer class="site">
+        <span>Footscope · GMT−5</span
         ><span>Source : API-Football · Outil d’observation · Aucun gain garanti</span>
       </footer>
     </main>

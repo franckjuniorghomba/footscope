@@ -4,6 +4,76 @@ let queue = Promise.resolve(),
   lastCall = 0,
   providerPausedUntil = 0;
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+// Compteurs du cache par isolat, en mémoire : aucune écriture R2 supplémentaire. Ils repartent
+// de zéro à chaque nouvel isolat ; `since` indique leur début. Seul le chemin normalisé
+// (point d'accès et noms de paramètres, sans valeurs) sert de clé, en nombre borné.
+const METRIC_ROUTES = 64,
+  METRIC_SEEN = 2000;
+let metricsSince = new Date().toISOString();
+const routeMetrics = new Map(),
+  fetchedPaths = new Map();
+export function normalizedPath(path) {
+  const [endpoint, query = ''] = String(path).split('?');
+  const names = [...new Set([...new URLSearchParams(query).keys()])].sort();
+  return endpoint.replace(/\/\d+(?=\/|$)/g, '/:id') + (names.length ? '?' + names.join('&') : '');
+}
+function countMetric(path, field) {
+  let route = normalizedPath(path);
+  if (!routeMetrics.has(route) && routeMetrics.size >= METRIC_ROUTES) route = 'autres';
+  let m = routeMetrics.get(route);
+  if (!m)
+    routeMetrics.set(
+      route,
+      (m = {
+        memoryHits: 0,
+        bucketHits: 0,
+        inflightJoins: 0,
+        misses: 0,
+        requests: 0,
+        duplicateRequests: 0,
+        quotaRefusals: 0,
+      }),
+    );
+  m[field]++;
+}
+function countRequest(path) {
+  countMetric(path, 'requests');
+  if (fetchedPaths.has(path)) countMetric(path, 'duplicateRequests');
+  fetchedPaths.delete(path);
+  fetchedPaths.set(path, true);
+  if (fetchedPaths.size > METRIC_SEEN) fetchedPaths.delete(fetchedPaths.keys().next().value);
+}
+export function cacheMetrics() {
+  const routes = Object.fromEntries(
+    [...routeMetrics].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, { ...v }]),
+  );
+  const totals = {
+    memoryHits: 0,
+    bucketHits: 0,
+    inflightJoins: 0,
+    misses: 0,
+    requests: 0,
+    duplicateRequests: 0,
+    quotaRefusals: 0,
+  };
+  for (const m of Object.values(routes)) for (const k in totals) totals[k] += m[k];
+  const hits = totals.memoryHits + totals.bucketHits;
+  return {
+    scope: 'isolat',
+    since: metricsSince,
+    totals: {
+      ...totals,
+      hits,
+      hitRate: hits + totals.misses ? hits / (hits + totals.misses) : null,
+    },
+    routes,
+  };
+}
+export function resetCacheMetrics() {
+  routeMetrics.clear();
+  fetchedPaths.clear();
+  metricsSince = new Date().toISOString();
+}
 const API_SPACING_MS = 6500;
 export async function reserveProviderSlot(env, spacing = API_SPACING_MS) {
   if (!env.BUCKET) return Math.max(Date.now(), lastCall + spacing);
@@ -145,7 +215,10 @@ export function providerBase(env) {
 export async function api(env, path, ttl = 300000) {
   if (!env.API_FOOTBALL_KEY) throw Error('La connexion API reste à configurer.');
   const hit = memory.get(path);
-  if (hit && Date.now() - hit.at < ttl) return hit.data;
+  if (hit && Date.now() - hit.at < ttl) {
+    countMetric(path, 'memoryHits');
+    return hit.data;
+  }
   const cacheKey = await cacheKeyFor(path);
   if (env.BUCKET)
     try {
@@ -154,11 +227,16 @@ export async function api(env, path, ttl = 300000) {
         const cached = await obj.json();
         if (Date.now() - cached.at < ttl) {
           memory.set(path, cached);
+          countMetric(path, 'bucketHits');
           return cached.data;
         }
       }
     } catch {}
-  if (pending.has(path)) return pending.get(path);
+  countMetric(path, 'misses');
+  if (pending.has(path)) {
+    countMetric(path, 'inflightJoins');
+    return pending.get(path);
+  }
   const job = (async () => {
     if (env.BUCKET)
       try {
@@ -169,21 +247,20 @@ export async function api(env, path, ttl = 300000) {
       throw limitError(Math.ceil((providerPausedUntil - Date.now()) / 1000));
     const base = providerBase(env);
     const relay = new URL(base).origin !== 'https://v3.football.api-sports.io';
-    const r = await paced(
-      () =>
-        fetch(base + path, {
-          headers: {
-            'x-apisports-key': env.API_FOOTBALL_KEY,
-            Accept: 'application/json',
-            'User-Agent': 'FootScope/1.0',
-            ...(relay ? { 'x-relay-token': env.API_RELAY_TOKEN } : {}),
-          },
-          cache: 'no-store',
-          redirect: 'manual',
-          signal: AbortSignal.timeout(20000),
-        }),
-      env,
-    );
+    const r = await paced(() => {
+      countRequest(path);
+      return fetch(base + path, {
+        headers: {
+          'x-apisports-key': env.API_FOOTBALL_KEY,
+          Accept: 'application/json',
+          'User-Agent': 'FootScope/1.0',
+          ...(relay ? { 'x-relay-token': env.API_RELAY_TOKEN } : {}),
+        },
+        cache: 'no-store',
+        redirect: 'manual',
+        signal: AbortSignal.timeout(20000),
+      });
+    }, env);
     if (r.status === 429) return markLimited(env, path, r, {});
     if (!r.ok) throw Error('Le fournisseur est indisponible (HTTP ' + r.status + ').');
     const d = await r.json();
@@ -216,6 +293,10 @@ export async function api(env, path, ttl = 300000) {
     return result;
   })();
   pending.set(path, job);
+  job.catch((e) => {
+    if (e?.code === 'API_RATE_LIMIT' || e?.code === 'API_QUEUE_BUSY')
+      countMetric(path, 'quotaRefusals');
+  });
   try {
     return await job;
   } finally {

@@ -161,6 +161,10 @@ const currentSource = await readFile(
 const policyUrl = new URL('../src/server/policy.js', import.meta.url).href;
 async function load(source, instrument = false) {
   source = source.replace("'./policy.js'", JSON.stringify(policyUrl));
+  source = source.replace(
+    "'./market.js'",
+    JSON.stringify(new URL('../src/server/market.js', import.meta.url).href),
+  );
   if (instrument) {
     // Compteurs injectés uniquement dans les modules du test, au point de calcul réel.
     const probabilityMarker = 'function eventProbability(market, selection, lh, la) {';
@@ -222,16 +226,17 @@ function fixture(bookmakers = 10) {
   };
 }
 function compare(data, at = now) {
+  const decisions = ({ market, ...report }) => report;
   const expected = reference.assessMatch(data, at);
   const snapshot = structuredClone(data);
-  assert.deepStrictEqual(current.assessMatch(data, at), expected);
+  assert.deepStrictEqual(decisions(current.assessMatch(data, at)), expected);
   assert.deepStrictEqual(data, snapshot, 'Les données entrantes restent intactes');
   // deepStrictEqual ne compare pas l’ordre des clés : vérifier aussi la sérialisation.
-  assert.equal(JSON.stringify(current.assessMatch(data, at)), JSON.stringify(expected));
+  assert.equal(JSON.stringify(decisions(current.assessMatch(data, at))), JSON.stringify(expected));
   before.calls.probability = before.calls.distribution = 0;
   after.calls.probability = after.calls.distribution = 0;
   assert.deepStrictEqual(before.assessMatch(data, at), expected);
-  assert.deepStrictEqual(after.assessMatch(data, at), expected);
+  assert.deepStrictEqual(decisions(after.assessMatch(data, at)), expected);
   assert.equal(expected.modelValidated, false);
   assert(expected.events.every((event) => event.realMoneyEligible === false));
   return expected;

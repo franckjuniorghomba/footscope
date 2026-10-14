@@ -1,9 +1,10 @@
-import { api, fixturesForDay } from './provider.js';
+import { api, cacheMetrics, fixturesForDay } from './provider.js';
 import { POLICY } from './policy.js';
 import { json } from './http.js';
 import { assistant } from './assistant.js';
 import { performance } from './storage.js';
-import { page, css, clientScript } from '../../.build/web-assets.js';
+import { exportEvidence, finishEvidence } from './jobs.js';
+import { page, css, clientScript, fonts } from '../../.build/web-assets.js';
 
 export default {
   async fetch(req, env) {
@@ -14,9 +15,14 @@ export default {
     )
       return json({ error: 'Méthode non autorisée' }, 405);
     try {
+      if (u.pathname === '/api/assistant/evidence') {
+        if (req.method !== 'GET')
+          return json({ error: 'Méthode non autorisée', code: 'METHOD_NOT_ALLOWED' }, 405);
+        return await exportEvidence(req, env);
+      }
       if (u.pathname === '/api/diagnostics') {
         const obj = env.BUCKET ? await env.BUCKET.get('api-control/last-limit.json') : null;
-        return json({ lastLimit: obj ? await obj.json() : null });
+        return json({ lastLimit: obj ? await obj.json() : null, cache: cacheMetrics() });
       }
       if (u.pathname === '/api/performance') return json(await performance(env));
       if (u.pathname === '/api/assistant/latest') {
@@ -34,8 +40,12 @@ export default {
           policy: POLICY,
           modelValidated: false,
         });
-      if (req.method === 'POST' && u.pathname.startsWith('/api/assistant/'))
-        return await assistant(req, env, u.pathname);
+      if (req.method === 'POST' && u.pathname.startsWith('/api/assistant/')) {
+        const response = await assistant(req, env, u.pathname);
+        return u.pathname === '/api/assistant/propose'
+          ? await finishEvidence(req, env, response)
+          : response;
+      }
       if (u.pathname === '/api/status') {
         const d = await api(env, 'status', 60000);
         return json({
@@ -128,6 +138,20 @@ export default {
             'X-Content-Type-Options': 'nosniff',
           },
         });
+      if (u.pathname.startsWith('/assets/fonts/')) {
+        const name = u.pathname.slice('/assets/fonts/'.length);
+        if (Object.hasOwn(fonts, name))
+          return new Response(
+            Uint8Array.from(atob(fonts[name]), (c) => c.charCodeAt(0)),
+            {
+              headers: {
+                'Content-Type': 'font/woff2',
+                'Cache-Control': 'public, max-age=86400',
+                'X-Content-Type-Options': 'nosniff',
+              },
+            },
+          );
+      }
       if (u.pathname === '/')
         return new Response(page, {
           headers: {
