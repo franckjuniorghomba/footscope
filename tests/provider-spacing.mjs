@@ -81,6 +81,8 @@ try {
       {},
       { ...pro, 'x-ratelimit-limit': '-300' },
       { ...pro, 'x-ratelimit-limit': 'Infinity' },
+      { ...pro, 'x-ratelimit-limit': '1000000000000000' },
+      { ...pro, 'x-ratelimit-limit': '7501' },
       { ...pro, 'x-ratelimit-requests-remaining': '7501' },
       { ...pro, 'x-ratelimit-requests-limit': '' },
     ]) {
@@ -114,6 +116,112 @@ try {
     await provider.api(env, 'status?resume=' + type, 0);
     assert(times.at(-1) - refusedAt >= 6500);
     assert.equal(provider.cacheMetrics().totals.quotaRefusals, 2);
+  }
+  // Une panne d'observation survient APRÈS la réservation et la réponse payante.
+  // Les erreurs R2 sont volontairement sensibles : aucun contenu ne doit être journalisé.
+  const originalFetch = globalThis.fetch;
+  const originalWarn = console.warn;
+  const warnings = [];
+  console.warn = (...args) => warnings.push(args);
+  try {
+    for (const fault of ['put', 'get', 'cas']) {
+      for (const outcome of ['http', 'body', 'body-missing', 'http-error', 'success', 'missing']) {
+        const client = await load(`observation-failure-${fault}-${outcome}`);
+        const storage = bucket();
+        const originalPut = storage.put.bind(storage);
+        const originalGet = storage.get.bind(storage);
+        const operations = [];
+        let armed = false;
+        let observationAttempts = 0;
+        storage.get = async (key) => {
+          if (armed && key === 'api-control/next-slot.json' && fault === 'get')
+            throw Error('private-provider-key private-relay-token private-person');
+          return originalGet(key);
+        };
+        storage.put = async (key, value, options) => {
+          operations.push(key);
+          if (armed && key === 'api-control/next-slot.json') {
+            observationAttempts++;
+            if (fault === 'put')
+              throw Error('private-provider-key private-relay-token private-person');
+            if (fault === 'cas') return null;
+          }
+          return originalPut(key, value, options);
+        };
+        const env = {
+          API_FOOTBALL_KEY: 'private-provider-key',
+          API_RELAY_TOKEN: 'private-relay-token',
+          BUCKET: storage,
+        };
+        let requests = 0;
+        globalThis.fetch = async () => {
+          requests++;
+          armed = true;
+          return Response.json(
+            {
+              response: [{ fixture: { id: 216 } }],
+              errors: outcome.startsWith('body') ? { rateLimit: 'quota exceeded' } : {},
+            },
+            {
+              status: outcome === 'http' ? 429 : outcome === 'http-error' ? 503 : 200,
+              headers: {
+                ...(outcome.includes('missing') ? {} : pro),
+                'retry-after': '30',
+              },
+            },
+          );
+        };
+        const path = 'status?person=private-person';
+        if (['http', 'body', 'body-missing'].includes(outcome)) {
+          await assert.rejects(client.api(env, path), {
+            code: 'API_RATE_LIMIT',
+            status: 429,
+            retryAfter: 30,
+            retryable: true,
+          });
+          const cooldown = JSON.parse(storage.db.get('api-control/cooldown.json').value);
+          assert(cooldown.until > now);
+          if (fault !== 'get')
+            assert(
+              operations.indexOf('api-control/cooldown.json') <
+                operations.lastIndexOf('api-control/next-slot.json'),
+            );
+          assert.equal(client.cacheMetrics().totals.quotaRefusals, 1);
+          const peer = await load(`pause-peer-${fault}-${outcome}`);
+          await assert.rejects(peer.api(env, 'status?peer=1'), { code: 'API_RATE_LIMIT' });
+          storage.db.delete('api-control/cooldown.json');
+          await assert.rejects(client.api(env, 'status?local=1'), { code: 'API_RATE_LIMIT' });
+          assert.equal(requests, 1, 'Pauses locale et partagée empêchent les appels suivants');
+        } else if (outcome === 'http-error') {
+          await assert.rejects(client.api(env, path), /HTTP 503/);
+          assert.equal(client.cacheMetrics().totals.quotaRefusals, 0);
+        } else {
+          const result = await client.api(env, path);
+          assert.equal(result.response[0].fixture.id, 216);
+          assert.equal(await client.api(env, path), result, 'La réponse réussie reste en cache');
+          assert.equal(requests, 1);
+          assert([...storage.db.keys()].some((key) => key.startsWith('api-cache/')));
+          assert.equal(client.cacheMetrics().totals.quotaRefusals, 0);
+        }
+        assert.equal(client.cacheMetrics().totals.spacingObservationFailures, 1);
+        assert.equal(observationAttempts, fault === 'cas' ? 20 : fault === 'put' ? 1 : 0);
+        client.resetCacheMetrics();
+        assert.equal(client.cacheMetrics().totals.spacingObservationFailures, 0);
+      }
+    }
+    assert.equal(warnings.length, 18);
+    assert(
+      warnings.every(
+        (args) =>
+          args.length === 1 && args[0] === 'Observation de cadence fournisseur non partagée (R2).',
+      ),
+    );
+    console.log(
+      'Passed: observation put/get/CAS failures preserve shared/local pauses, typed refusals, HTTP errors and successful cached responses; diagnostics contain no secrets or personal data.',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.warn = originalWarn;
   }
   const provider = await load('daily');
   const env = { API_FOOTBALL_KEY: 'fixture', BUCKET: bucket() };

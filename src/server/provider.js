@@ -35,6 +35,7 @@ function countMetric(path, field) {
         requests: 0,
         duplicateRequests: 0,
         quotaRefusals: 0,
+        spacingObservationFailures: 0,
       }),
     );
   m[field]++;
@@ -58,6 +59,7 @@ export function cacheMetrics() {
     requests: 0,
     duplicateRequests: 0,
     quotaRefusals: 0,
+    spacingObservationFailures: 0,
   };
   for (const m of Object.values(routes)) for (const k in totals) totals[k] += m[k];
   const hits = totals.memoryHits + totals.bucketHits;
@@ -99,11 +101,22 @@ function responseSpacing(headers) {
   const minute = headerNumber(headers, 'x-ratelimit-limit');
   const daily = headerNumber(headers, 'x-ratelimit-requests-limit');
   const remaining = headerNumber(headers, 'x-ratelimit-requests-remaining');
-  if (!minute || !daily || remaining === null || remaining > daily) return API_SPACING_MS;
+  if (!minute || !daily || minute > daily || remaining === null || remaining > daily)
+    return API_SPACING_MS;
   if (remaining / daily < 0.05) return Math.max(60000, API_SPACING_MS);
   return Math.max(250, Math.ceil(1000 / 3), Math.ceil(60000 / (minute * 0.7)));
 }
-async function observeSpacing(env, spacing) {
+// L'observation ne doit jamais remplacer une réponse fournisseur, surtout un refus.
+// Le journal ne reprend ni l'erreur R2 brute, ni le chemin ou les valeurs de paramètres.
+async function observeSpacing(env, spacing, path) {
+  try {
+    await persistSpacing(env, spacing);
+  } catch {
+    countMetric(path, 'spacingObservationFailures');
+    console.warn('Observation de cadence fournisseur non partagée (R2).');
+  }
+}
+async function persistSpacing(env, spacing) {
   providerSpacing = spacing;
   spacingObservedAt = Date.now();
   if (!env.BUCKET) return;
@@ -227,7 +240,6 @@ async function cacheKeyFor(path) {
   );
 }
 async function markLimited(env, path, response, data) {
-  await observeSpacing(env, API_SPACING_MS);
   const seconds = providerLimitSeconds(response.headers);
   providerPausedUntil = Date.now() + seconds * 1000;
   const diagnostic = {
@@ -265,6 +277,7 @@ async function markLimited(env, path, response, data) {
       );
       await env.BUCKET.put('api-control/last-limit.json', JSON.stringify(diagnostic));
     } catch {}
+  await observeSpacing(env, API_SPACING_MS, path);
   throw limitError(seconds);
 }
 // Les IP de sortie partagées de l'hébergement peuvent être limitées par API-Football
@@ -355,11 +368,10 @@ export async function api(env, path, ttl = 300000) {
       });
       if (r.status === 429) return markLimited(env, path, r, {});
       if (!r.ok) {
-        await observeSpacing(env, API_SPACING_MS);
+        await observeSpacing(env, API_SPACING_MS, path);
         throw Error('Le fournisseur est indisponible (HTTP ' + r.status + ').');
       }
       const spacing = responseSpacing(r.headers);
-      if (spacing >= API_SPACING_MS) await observeSpacing(env, spacing);
       const d = await r.json();
       if (d.errors && Object.keys(d.errors).length) {
         const rate = Object.entries(d.errors).some(
@@ -368,6 +380,7 @@ export async function api(env, path, ttl = 300000) {
             (/rate|limit/i.test(k) && /minute|second|too many|rate/i.test(String(v))),
         );
         if (rate) return markLimited(env, path, r, d);
+        await observeSpacing(env, API_SPACING_MS, path);
         const info = Object.entries(d.errors)
           .map(([k, v]) => k + ': ' + String(v))
           .join(' · ')
@@ -378,7 +391,7 @@ export async function api(env, path, ttl = 300000) {
           .slice(0, 700);
         throw Error('API-Football : ' + info);
       }
-      if (spacing < API_SPACING_MS) await observeSpacing(env, spacing);
+      await observeSpacing(env, spacing, path);
       const result = { ...d, retrievedAt: new Date().toISOString() };
       const cached = { at: Date.now(), data: result };
       memory.set(path, cached);
