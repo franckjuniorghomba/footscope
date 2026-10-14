@@ -1,4 +1,5 @@
 import { api, cacheMetrics, fixturesForDay } from './provider.js';
+import { archiveMetrics } from './odds-archive.js';
 import { POLICY } from './policy.js';
 import { json } from './http.js';
 import { assistant } from './assistant.js';
@@ -22,7 +23,11 @@ export default {
       }
       if (u.pathname === '/api/diagnostics') {
         const obj = env.BUCKET ? await env.BUCKET.get('api-control/last-limit.json') : null;
-        return json({ lastLimit: obj ? await obj.json() : null, cache: cacheMetrics() });
+        return json({
+          lastLimit: obj ? await obj.json() : null,
+          cache: cacheMetrics(),
+          oddsArchive: archiveMetrics(),
+        });
       }
       if (u.pathname === '/api/performance') return json(await performance(env));
       if (u.pathname === '/api/assistant/latest') {

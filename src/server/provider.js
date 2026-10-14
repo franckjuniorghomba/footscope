@@ -1,3 +1,4 @@
+import { archiveOdds } from './odds-archive.js';
 const memory = new Map(),
   pending = new Map();
 let queue = Promise.resolve(),
@@ -290,6 +291,9 @@ export async function api(env, path, ttl = 300000) {
     if (path.startsWith('fixtures?date='))
       for (const f of d.response || [])
         memory.set('fixtures?id=' + f.fixture.id, { at: Date.now(), data: { response: [f] } });
+    // Réponse réellement reçue du fournisseur : seule entrée de l'archive des cotes (BIS-192).
+    // archiveOdds ne rejette jamais et rend la main dans un délai borné.
+    await archiveOdds(env, path, result);
     return result;
   })();
   pending.set(path, job);
