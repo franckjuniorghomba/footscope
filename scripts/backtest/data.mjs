@@ -12,11 +12,18 @@ export const readJson = async (path) => JSON.parse(await readFile(path, 'utf8'))
 export const defaultPlan = await readJson(new URL('./plan.json', import.meta.url));
 // BIS-185 : fin de période fixée par la collecte (journée GMT−5 de sa première tentative, exclue).
 export const COLLECTION_DAY = 'collection-day';
-const hex64 = (v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
+export const hex64 = (v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
+// Limite de collecte : un plan ne demande jamais plus de couples que le registre
+// n'autorise d'appels (MAX_CALLS de budget.mjs, égalité testée).
+export const COLLECTION_PAIRS = 30;
+// Périmètre d'analyse d'une période neuve : historique épinglé (30 couples) et une
+// saison neuve (10). Réservé au runner, après vérification des deux sommes de collecte.
+export const ANALYSIS_PAIRS = 40;
 
 // Un plan ouvert (testEnd = COLLECTION_DAY) n'est accepté que par le collecteur ;
 // le runner le résout avec la date écrite dans le jeu avant tout calcul.
-export function validatePlan(plan, { openEnd = false } = {}) {
+// `analysis` valide un plan combiné déjà résolu ; il n'augmente aucun budget d'appels.
+export function validatePlan(plan, { openEnd = false, analysis = false } = {}) {
   const date = (v) =>
     typeof v === 'string' &&
     /^\d{4}-\d{2}-\d{2}$/.test(v) &&
@@ -28,7 +35,8 @@ export function validatePlan(plan, { openEnd = false } = {}) {
     !Array.isArray(plan.seasons) ||
     !plan.leagues.length ||
     !plan.seasons.length ||
-    plan.leagues.length * plan.seasons.length > 30 ||
+    plan.leagues.length * plan.seasons.length > (analysis ? ANALYSIS_PAIRS : COLLECTION_PAIRS) ||
+    (analysis && (openEnd || plan.history !== undefined)) ||
     [plan.leagues, plan.seasons].some(
       (xs) => new Set(xs).size !== xs.length || xs.some((x) => !Number.isSafeInteger(x) || x <= 0),
     ) ||

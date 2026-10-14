@@ -19,6 +19,7 @@ import {
 } from '../scripts/backtest/data.mjs';
 import { runBacktest } from '../scripts/backtest/engine.mjs';
 import { writeReport } from '../scripts/backtest/run.mjs';
+import { providerResponse, seasonFixtures } from './fixtures/backtest-synthetic.mjs';
 
 const run = promisify(execFile);
 // Plan et somme du jeu BIS-167 tels que collectés : toute dérive casse la reprise du cache.
@@ -45,42 +46,6 @@ assert.equal(
   BIS167_PLAN_HASH,
 );
 
-// Saisons synthétiques : huit équipes, aller-retour, une journée toutes les deux semaines.
-const roundDay = (season, round) => Date.UTC(season, 7, 5, 14) + round * 14 * 86400000;
-function seasonFixtures(league, season, collectedAt) {
-  const teams = Array.from({ length: 8 }, (_, i) => league * 100 + i + 1);
-  const rounds = [];
-  for (let r = 0; r < 7; r++) {
-    const order = [teams[0], ...teams.slice(1).map((_, i) => teams[1 + ((i + r) % 7)])];
-    rounds.push([0, 1, 2, 3].map((i) => [order[i], order[7 - i]]));
-  }
-  const all = [...rounds, ...rounds.map((xs) => xs.map(([h, a]) => [a, h]))];
-  let seed = league * 7919 + season;
-  const goal = () => {
-    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
-    return [0, 0, 1, 1, 1, 2, 2, 3][seed % 8];
-  };
-  return all.flatMap((matches, round) =>
-    matches.map(([home, away], i) => {
-      const timestamp = (roundDay(season, round) + i * 3600000) / 1000;
-      const played = timestamp * 1000 < collectedAt;
-      return {
-        fixture: {
-          id: league * 1e7 + season * 1000 + round * 10 + i,
-          date: new Date(timestamp * 1000).toISOString(),
-          timestamp,
-          status: { short: played ? 'FT' : 'NS' },
-        },
-        league: { id: league, season, name: 'Ligue synthétique', country: 'Démo' },
-        teams: {
-          home: { id: home, name: `Equipe fictive ${home}` },
-          away: { id: away, name: `Equipe fictive ${away}` },
-        },
-        goals: played ? { home: goal(), away: goal() } : { home: null, away: null },
-      };
-    }),
-  );
-}
 // Collecte le 2026-10-14 à 15:00 GMT−5 : la journée du 14 a déjà un match FT, mais reste exclue.
 const collectedAt = Date.parse('2026-10-14T20:00:00Z');
 let calls = 0;
@@ -88,20 +53,13 @@ const fetchImpl = async (url, options) => {
   calls++;
   assert.equal(options.redirect, 'error');
   const u = new URL(url);
-  const response = seasonFixtures(
-    Number(u.searchParams.get('league')),
-    Number(u.searchParams.get('season')),
-    collectedAt,
+  return providerResponse(
+    seasonFixtures(
+      Number(u.searchParams.get('league')),
+      Number(u.searchParams.get('season')),
+      collectedAt,
+    ),
   );
-  return {
-    ok: true,
-    json: async () => ({
-      errors: [],
-      response,
-      results: response.length,
-      paging: { current: 1, total: 1 },
-    }),
-  };
 };
 const options = { key: 'fixture-key', fetchImpl, wait: async () => {}, now: () => collectedAt };
 const exists = (path) =>

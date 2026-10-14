@@ -2,7 +2,7 @@ import { assessMatch, eventProbability } from '../../src/server/statistics.js';
 import { selectCouponDetailed } from '../../src/server/coupon.js';
 import { POLICY, MODEL_VERSION } from '../../src/server/policy.js';
 import { settledOutcome } from '../../src/server/storage.js';
-import { defaultPlan, dayStart, fixedDay, validateDataset, validatePlan } from './data.mjs';
+import { defaultPlan, dayStart, fixedDay, hex64, validateDataset, validatePlan } from './data.mjs';
 import { bootstrapDays, scores, scoreIntervals, ticketSummary } from './metrics.mjs';
 import {
   DIXON_COLES_GRID,
@@ -45,9 +45,19 @@ export function forecast(model, market, selection) {
 const product = (rows, key) => rows.reduce((p, r) => p * r[key], 1);
 const teamKey = (f, side) => `${f.league.id}:${f.teams[side].id}`;
 
-export function runBacktest(dataset, plan = dataset.plan || defaultPlan) {
+// `analysis` : jeu combiné dont run.mjs a vérifié les deux sommes (périmètre jusqu'à 40 couples).
+export function runBacktest(
+  dataset,
+  plan = dataset.plan || defaultPlan,
+  { analysis = false } = {},
+) {
   validateDataset(dataset);
-  validatePlan(plan);
+  if (
+    analysis &&
+    ![dataset.sources?.history?.sha256, dataset.sources?.current?.sha256].every(hex64)
+  )
+    throw Error('Périmètre d’analyse réservé à un jeu combiné aux sommes vérifiées.');
+  validatePlan(plan, { analysis });
   if (
     dataset.fixtures.some(
       (f) => !plan.leagues.includes(f.league.id) || !plan.seasons.includes(f.league.season),

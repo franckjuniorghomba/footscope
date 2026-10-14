@@ -13,10 +13,12 @@ import {
 import { runBacktest } from './engine.mjs';
 import { calibrationSvg, markdownReport } from './report.mjs';
 
+// `verified` : somme de collecte contrôlée (jeux historiques seulement).
 async function verifiedDataset(input) {
   const bytes = await readFile(input),
     dataset = JSON.parse(bytes);
-  if (dataset.kind === 'historical') {
+  const verified = dataset.kind === 'historical';
+  if (verified) {
     const checksum = JSON.parse(
       await readFile(join(dirname(input), 'dataset-checksum.json'), 'utf8'),
     );
@@ -27,7 +29,7 @@ async function verifiedDataset(input) {
     )
       throw Error('Jeu historique altéré depuis sa collecte.');
   }
-  return { bytes, dataset };
+  return { bytes, dataset, verified };
 }
 
 // BIS-185 : un jeu à période neuve exige l'historique épinglé par son plan (--history).
@@ -35,7 +37,8 @@ export async function writeReport(input, out, { history } = {}) {
   out = await externalDirectory(out);
   const verified = await verifiedDataset(input),
     bytes = verified.bytes;
-  let dataset = verified.dataset;
+  let dataset = verified.dataset,
+    analysis = false;
   const fresh = dataset.plan?.testEnd === COLLECTION_DAY;
   if (fresh !== Boolean(history))
     throw Error('--history est requis pour un plan à période neuve, et réservé à ce cas.');
@@ -47,9 +50,11 @@ export async function writeReport(input, out, { history } = {}) {
       current: dataset,
       currentSha256: sha256(bytes),
     });
+    // Périmètre d'analyse élargi (10 ligues × 4 saisons) seulement si les deux sommes sont vérifiées.
+    analysis = past.verified && verified.verified;
   }
   const start = performance.now();
-  const report = runBacktest(dataset);
+  const report = runBacktest(dataset, dataset.plan, { analysis });
   report.elapsedMs = performance.now() - start;
   report.maxRssKiB = process.resourceUsage().maxRSS;
   report.inputSha256 = sha256(bytes);

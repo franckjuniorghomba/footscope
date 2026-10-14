@@ -96,6 +96,19 @@ d'une reprise depuis le cache. Les statuts collectés sont comptés
 collecte ou d'après ne sont ni évalués ni appris. Leur nombre figure dans
 `coverage.afterTestEnd` ; les non-FT antérieurs sont exclus avec le motif `non_final`.
 
+`coverage.afterTestEnd` (`{ count, byStatus }`) est un champ **ajouté** à tous les
+rapports, y compris celui du plan par défaut. Il compte, par statut, les rencontres
+datées de `testEnd` ou après. Pour le jeu BIS-167 (`7101245773e9…`), il vaut
+`{ "count": 0, "byStatus": {} }`. Les autres champs, statistiques, prédictions et
+tickets restent identiques, hors `elapsedMs` et `maxRssKiB`. Un lecteur de l'ancien
+format peut l'ignorer.
+
+Limite de collecte et périmètre d'analyse sont distincts. Un plan de collecte
+demande au plus 30 couples (`MAX_CALLS`, inchangé) et seul le registre autorise
+les appels. Le plan combiné par `run.mjs --history` (dix ligues × 2023-2026, soit
+40 couples) n'est accepté que par le runner, après vérification des sommes de
+collecte des deux jeux ; il ne déclenche aucun appel.
+
 ### Commande à lancer par l'humain (autorisation de dix appels)
 
 Le registre partagé est plein (30/30). Il n'est jamais remis à zéro
@@ -106,18 +119,41 @@ permet exactement dix appels. Depuis la racine du checkout :
 export BACKTEST_BUDGET_FILE=/root/.local/share/jarvis/livrables/footscope/BIS-167/budget-api-football.json
 export JARVIS_LIVRABLES=/root/.local/share/jarvis/livrables/footscope/BIS-185
 ARCHIVE=/root/.local/share/jarvis/livrables/footscope/BIS-167/budget-api-football-bis167-30-appels.json
-# 1. Aucun collecteur actif, aucun verrou, archive absente ; 2. archiver (déplacement,
-# sans suppression) puis initialiser au même chemin. Tout échec arrête la chaîne.
-! pgrep -f scripts/backtest/collect.mjs && test ! -e "$BACKTEST_BUDGET_FILE.lock" &&
-  test ! -e "$ARCHIVE" && mv -n "$BACKTEST_BUDGET_FILE" "$ARCHIVE" &&
+# Sous-shell à arrêt immédiat : le premier échec arrête tout, avant saisie et réseau.
+# La clé n'existe que dans ce sous-shell ; son code de sortie reste dans $?.
+(
+  set -eu
+  # 1. Aucun collecteur actif, aucun verrou, archive absente.
+  if pgrep -f '[s]cripts/backtest/collect.mjs' >/dev/null; then
+    echo 'Collecteur actif : arrêt, aucune modification.' >&2
+    exit 1
+  fi
+  test ! -e "$BACKTEST_BUDGET_FILE.lock"
+  test ! -e "$ARCHIVE"
+  # 2. Archiver (déplacement, sans suppression) puis initialiser au même chemin.
+  mv -n "$BACKTEST_BUDGET_FILE" "$ARCHIVE"
+  test -e "$ARCHIVE"
+  test ! -e "$BACKTEST_BUDGET_FILE"
   node scripts/backtest/budget.mjs --used 20 \
     --reason "BIS-185 : 10 appels autorisés pour la saison 2026 ; registre précédent archivé (30/30)"
-# 3. Clé saisie sans écho, jamais dans l'historique ni dans un fichier.
-read -rsp 'Clé API-Football : ' API_FOOTBALL_KEY && echo && export API_FOOTBALL_KEY
-node scripts/backtest/collect.mjs --plan scripts/backtest/plan-2026.json \
-  --out "$JARVIS_LIVRABLES/api-football-2026"
-unset API_FOOTBALL_KEY
+  # 3. Clé saisie sans écho, jamais dans l'historique ni dans un fichier ; vide = arrêt.
+  read -rsp 'Clé API-Football : ' API_FOOTBALL_KEY
+  echo >&2
+  test -n "$API_FOOTBALL_KEY"
+  export API_FOOTBALL_KEY
+  node scripts/backtest/collect.mjs --plan scripts/backtest/plan-2026.json \
+    --out "$JARVIS_LIVRABLES/api-football-2026"
+)
 ```
+
+Le bloc entier est une seule unité. Il s'arrête avec un code non nul, **sans aucun
+appel**, si un collecteur est actif, si un verrou ou l'archive existe, si le
+déplacement ou l'initialisation échoue, ou si la saisie de clé échoue ou est vide.
+L'archive existante n'est jamais écrasée. La clé disparaît avec le sous-shell, que
+la collecte réussisse ou non ; `echo $?` donne ensuite le code du premier échec.
+Après un arrêt à l'étape 3, ne pas relancer ce bloc : l'archive existe et il
+refuserait. Relancer seulement l'étape 3 dans un sous-shell, avec la même commande
+`collect.mjs`.
 
 La sortie JSON donne le nombre d'appels, la somme du jeu, `testEnd` et les statuts.
 Une interruption se reprend par la même commande `collect.mjs` (cache vérifié,
