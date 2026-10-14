@@ -1,5 +1,5 @@
 import { POLICY, MODEL_VERSION } from './policy.js';
-import { marketReference } from './market.js';
+import { marketReference, sharpReference } from './market.js';
 
 export function distribution(lambda) {
   const p = [Math.exp(-lambda)];
@@ -159,5 +159,7 @@ export function assessMatch(d, now = Date.now()) {
     modelVersion: MODEL_VERSION,
     modelValidated: false,
     market: marketReference(d.odds, now),
+    // BIS-200 : repère Pinnacle brut, jugé frais ou non au moment de la comparaison.
+    sharpReference: sharpReference(d.odds, f.fixture.id),
   };
 }

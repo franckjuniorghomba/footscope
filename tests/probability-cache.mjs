@@ -226,7 +226,8 @@ function fixture(bookmakers = 10) {
   };
 }
 function compare(data, at = now) {
-  const decisions = ({ market, ...report }) => report;
+  // Repères descriptifs (BIS-172, BIS-200) : hors décision, absents de la copie de référence.
+  const decisions = ({ market, sharpReference, ...report }) => report;
   const expected = reference.assessMatch(data, at);
   const snapshot = structuredClone(data);
   assert.deepStrictEqual(decisions(current.assessMatch(data, at)), expected);

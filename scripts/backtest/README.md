@@ -77,6 +77,120 @@ réessayer. Après un arrêt brutal, vérifier que le processus est terminé ava
 retirer manuellement `collect.lock` et `<registre>.lock`. Ne pas lancer simultanément une autre collecte
 payante avec la même clé ; la coordination des appels du Worker demeure inchangée.
 
+## Période test neuve : saison 2026/27 (BIS-185)
+
+`plan-2026.json` est un second plan figé : les dix mêmes ligues, saison 2026
+seulement, soit **dix couples et dix appels au plus**. Il n'est utilisé que si
+`--plan` est passé explicitement au collecteur. Sans `--plan`, le collecteur
+utilise `plan.json`, avec le même `planHash` (`f41afaad…`) et le même jeu.
+Le plan 2026 a son propre `planHash`, et donc son propre journal, dans son propre
+dossier `--out`. Il ne touche jamais au jeu 2023-2025, dont il épingle la somme
+(`history.sha256 = 7101245773e9…`) et le plan.
+
+`testEnd` vaut `collection-day` : le collecteur écrit dans `dataset.json` la date
+de la **première** tentative de son journal (`collection.collectedAt`) et la
+journée GMT−5 correspondante (`collection.testEnd`, exclue). Seules les journées
+antérieures, complètes dans chaque fichier, sont évaluées. La date ne bouge pas lors
+d'une reprise depuis le cache. Les statuts collectés sont comptés
+(`collection.statuses`). Les matchs non joués (NS…) et ceux de la journée de
+collecte ou d'après ne sont ni évalués ni appris. Leur nombre figure dans
+`coverage.afterTestEnd` ; les non-FT antérieurs sont exclus avec le motif `non_final`.
+
+`coverage.afterTestEnd` (`{ count, byStatus }`) est un champ **ajouté** à tous les
+rapports, y compris celui du plan par défaut. Il compte, par statut, les rencontres
+datées de `testEnd` ou après. Pour le jeu BIS-167 (`7101245773e9…`), il vaut
+`{ "count": 0, "byStatus": {} }`. Les autres champs, statistiques, prédictions et
+tickets restent identiques, hors `elapsedMs` et `maxRssKiB`. Un lecteur de l'ancien
+format peut l'ignorer.
+
+Limite de collecte et périmètre d'analyse sont distincts. Un plan de collecte
+demande au plus 30 couples (`MAX_CALLS`, inchangé) et seul le registre autorise
+les appels. Le plan combiné par `run.mjs --history` (dix ligues × 2023-2026, soit
+40 couples) n'est accepté que par le runner, après vérification des sommes de
+collecte des deux jeux ; il ne déclenche aucun appel.
+
+### Commande à lancer par l'humain (autorisation de dix appels)
+
+Le registre partagé est plein (30/30). Il n'est jamais remis à zéro
+automatiquement : l'humain l'archive, puis l'initialise à `--used 20`, ce qui
+permet exactement dix appels. Depuis la racine du checkout :
+
+```sh
+export BACKTEST_BUDGET_FILE=/root/.local/share/jarvis/livrables/footscope/BIS-167/budget-api-football.json
+export JARVIS_LIVRABLES=/root/.local/share/jarvis/livrables/footscope/BIS-185
+ARCHIVE=/root/.local/share/jarvis/livrables/footscope/BIS-167/budget-api-football-bis167-30-appels.json
+# Sous-shell à arrêt immédiat : le premier échec arrête tout, avant saisie et réseau.
+# La clé n'existe que dans ce sous-shell ; son code de sortie reste dans $?.
+(
+  set -eu
+  # 1. Aucun collecteur actif, aucun verrou, archive absente.
+  if pgrep -f '[s]cripts/backtest/collect.mjs' >/dev/null; then
+    echo 'Collecteur actif : arrêt, aucune modification.' >&2
+    exit 1
+  fi
+  test ! -e "$BACKTEST_BUDGET_FILE.lock"
+  test ! -e "$ARCHIVE"
+  # 2. Archiver (déplacement, sans suppression) puis initialiser au même chemin.
+  mv -n "$BACKTEST_BUDGET_FILE" "$ARCHIVE"
+  test -e "$ARCHIVE"
+  test ! -e "$BACKTEST_BUDGET_FILE"
+  node scripts/backtest/budget.mjs --used 20 \
+    --reason "BIS-185 : 10 appels autorisés pour la saison 2026 ; registre précédent archivé (30/30)"
+  # 3. Clé saisie sans écho, jamais dans l'historique ni dans un fichier ; vide = arrêt.
+  read -rsp 'Clé API-Football : ' API_FOOTBALL_KEY
+  echo >&2
+  test -n "$API_FOOTBALL_KEY"
+  export API_FOOTBALL_KEY
+  node scripts/backtest/collect.mjs --plan scripts/backtest/plan-2026.json \
+    --out "$JARVIS_LIVRABLES/api-football-2026"
+)
+```
+
+Le bloc entier est une seule unité. Il s'arrête avec un code non nul, **sans aucun
+appel**, si un collecteur est actif, si un verrou ou l'archive existe, si le
+déplacement ou l'initialisation échoue, ou si la saisie de clé échoue ou est vide.
+L'archive existante n'est jamais écrasée. La clé disparaît avec le sous-shell, que
+la collecte réussisse ou non ; `echo $?` donne ensuite le code du premier échec.
+Après un arrêt à l'étape 3, ne pas relancer ce bloc : l'archive existe et il
+refuserait. Relancer seulement l'étape 3 dans un sous-shell, avec la même commande
+`collect.mjs`.
+
+La sortie JSON donne le nombre d'appels, la somme du jeu, `testEnd` et les statuts.
+Une interruption se reprend par la même commande `collect.mjs` (cache vérifié,
+sans nouvelle initialisation). Un refus du fournisseur (abonnement sans la saison
+2026, réponse vide ou paginée) consomme sa tentative et doit être signalé tel quel,
+sans annoncer de résultat. Après cette initialisation, l'ancien dossier
+`api-football` ne peut plus être _recollecté_ (son journal est absent du nouveau
+registre). Le runner continue de le lire, car il vérifie seulement ses sommes.
+
+### Évaluer la période neuve (seulement après le gel de la marge BIS-184)
+
+Ne lancer qu'une fois la marge de prudence BIS-184 figée : la période neuve ne
+doit être lue qu'une fois.
+
+```sh
+node scripts/backtest/run.mjs \
+  --input "$JARVIS_LIVRABLES/api-football-2026/dataset.json" \
+  --history /root/.local/share/jarvis/livrables/footscope/BIS-167/api-football/dataset.json \
+  --out "$JARVIS_LIVRABLES/historical-2026"
+```
+
+`--history` est obligatoire pour un jeu à période neuve, et refusé sinon. Le runner
+vérifie les deux sommes de collecte, puis que l'historique est bien celui épinglé par
+le plan (somme et `planHash`). Il vérifie aussi les ligues identiques, les saisons
+disjointes et l'absence de rencontre de l'historique à partir de `testStart`. Il
+contrôle la date de collecte et refuse toute rencontre présente dans les deux jeux.
+Le plan résolu couvre les saisons 2023 à 2026 : développement (choix de ξ et ridge
+Dixon-Coles) du 2025-07-01 au 2026-06-30, puis test du 2026-07-01 à `testEnd`.
+L'apprentissage reprend tout l'historique antérieur, journée par journée. Le
+rapport cite les deux sommes dans `sources`.
+
+Retour arrière : aucune migration ni donnée de production. Pour revenir à l'état
+antérieur, arrêter le collecteur. Déplacer ensuite le nouveau registre vers une
+seconde archive, sans le supprimer, puis remettre l'archive 30/30 à sa place. Le
+budget redevient alors plein, ce qui reste plus restrictif. Le jeu 2023-2025 n'est
+jamais modifié.
+
 ### Initialisation, reprise des anciens caches et réinitialisation
 
 `budget.mjs --used N --reason "motif écrit sans secret"` est une action manuelle
@@ -106,6 +220,50 @@ historique et de son plan avant de calculer. Ces fichiers restent hors Git. Une 
 terminée produit le même jeu et la même somme, sans appel supplémentaire. Une
 rencontre dupliquée, un statut FT sans score ou un périmètre incomplet sont des erreurs.
 
+## Sélection Dixon-Coles − m contre sélection actuelle (BIS-184)
+
+`selection.mjs` compose, sur les mêmes journées et avec le même `selectCouponDetailed`,
+deux tickets par journée : (A) la sélection actuelle, jambe si probabilité Poisson ≥ 0,7
+et historique récent, annoncé = probabilité prudente ; (B) jambe si probabilité
+Dixon-Coles ≥ 0,7 et historique récent, annoncé = max(0, p − m). Produit ≥ 0,5,
+un pari par match, quatre jambes au plus. A recomposée doit égaler le ticket du
+moteur, sinon la comparaison est refusée. Les lignes de prévision gagnent deux
+champs additifs, `recentHistory` et `kickoff`, et `runBacktest` accepte
+`dixonColesChosen` pour figer (ξ, ridge).
+
+La marge m suit une règle écrite avant tout calcul (`MARGIN_RULE`) : grille 0 à
+0,20 par pas de 0,01 ; plus petit m pour lequel, sur 2024/25, l'annoncé moyen des
+tickets B est ≤ au passage observé, au total et pour chaque taille d'au moins 30
+tickets. (ξ, ridge) sont ceux du run 2026/27, choisis sur 2025/26 avec l'historique
+seul. Trois étapes, dans cet ordre :
+
+```sh
+H=/root/.local/share/jarvis/livrables/footscope/BIS-167/api-football/dataset.json
+OUT=/root/.local/share/jarvis/livrables/footscope/BIS-184
+# 1. Gel sur 2024/25 (le fichier de paramètres est créé une seule fois, puis committé).
+node scripts/backtest/margin.mjs freeze --history "$H" --params scripts/backtest/margin-2026.json
+SHA=$(sha256sum scripts/backtest/margin-2026.json | cut -d' ' -f1)
+# 2. Contrôle 2025/26, saison déjà lue par BIS-167 et BIS-183.
+node scripts/backtest/margin.mjs control --history "$H" \
+  --params scripts/backtest/margin-2026.json --params-sha "$SHA" --out "$OUT"
+# 3. Lecture unique de 2026/27 : le témoin lecture-2026-27.json refuse toute relance.
+node scripts/backtest/margin.mjs evaluate --history "$H" \
+  --input /root/.local/share/jarvis/livrables/footscope/BIS-185/api-football-2026/dataset.json \
+  --params scripts/backtest/margin-2026.json --params-sha "$SHA" \
+  --control "$OUT/controle-2025-26.json" --out "$OUT"
+```
+
+Le gel a été fait le 2026-10-14 : **m = 0,03**, `margin-2026.json` SHA-256
+`9f912a82…`. Mesures : gel 44 s et 242 Mio de RSS, contrôle 10 s, évaluation
+7 s et 182 Mio. **La période 2026/27 a été lue par l'étape 3** ; toute nouvelle
+lecture, y compris par `run.mjs --history`, n'est plus un test intact.
+
+Le verdict par taille est mécanique : « annoncé fiable » si l'IC à 95 % de
+(observé − annoncé) contient 0 et |écart| < 5 points ; sinon « optimiste » ou
+« pessimiste » ; « non défini » sous deux tickets. L'IC est un bootstrap par
+ticket (un ticket par journée). Sous 30 tickets, il est peu fiable : avec quatre
+tickets tous gagnés, il est étroit à tort. Ce rapport ne dit rien du rendement.
+
 ## Interpréter les chiffres
 
 Les probabilités utilisent `assessMatch` et `eventProbability`, avec la même
@@ -130,11 +288,45 @@ populations différentes. Le rendement et la comparaison au marché sans marge
 sont reportés. football-data.co.uk est exclu et aucune source alternative n'est
 actuellement autorisée. `modelValidated` et `realMoneyEligible` restent faux.
 
+## Modèle Dixon-Coles (BIS-183, banc uniquement)
+
+`dixon-coles.mjs` ajoute une colonne `dixon-coles` à tous les tableaux, sans rien
+changer en production (`statistics.js`, `policy.js` et le Worker sont intacts).
+Par ligue : intercept, avantage du terrain, attaque et défense par équipe, avec
+Σattaques = Σdéfenses = 0, et correction ρ des seuls scores 0-0, 1-0, 0-1, 1-1
+(|ρ| ≤ 0,2). Maximum de vraisemblance pondéré par `exp(−ξ × âge en jours)`,
+L-BFGS déterministe, départ à chaud depuis l'ajustement précédent de la ligue.
+
+- **Anti-fuite** : réajustement au plus une fois par ligue et par journée GMT−5,
+  avec les seuls matchs FT des journées strictement antérieures ; prédire après
+  avoir appris le jour même lève une erreur.
+- **Rétrécissement** : pénalité ridge `½ × ridge × Σ(attaque² + défense²)`, prior
+  centré sur la moyenne de la ligue. Une équipe promue reste près de la moyenne
+  jusqu'à ce que ses matchs l'en écartent ; les prédictions avec une équipe sous
+  19 matchs de ligue sont comptées. Une rencontre sans prédiction Dixon-Coles est
+  exclue pour tous les modèles, avec son motif (`dixon_coles_*`).
+- **Choix de ξ et ridge** : grille fixe ξ ∈ {0 ; 0,001 ; 0,002 ; 0,004} × ridge ∈
+  {1 ; 4 ; 16}, critère = moyenne des Brier 1X2, Plus/moins 2,5 et BTTS sur la
+  saison de développement. Seules les rencontres antérieures à `testStart` sont
+  transmises au choix ; la saison test est lue une fois avec les paramètres figés.
+- **Verdict** par marché : « meilleur » si la différence de Brier Dixon-Coles −
+  Poisson est négative et que son IC apparié à 95 % (bootstrap par journée) exclut
+  0, « pire » symétriquement, sinon « indistinct ». ECE = écart pondéré des classes
+  de calibration de 0,1. Dixon-Coles est évalué sur les jambes choisies par le
+  sélecteur Poisson ; il ne compose pas ses propres tickets.
+
+Durée mesurée sur le jeu historique BIS-167 (9 824 rencontres, 12 points de grille
+puis passe finale) : environ 45 s et 380 Mio de RSS. Un verdict « meilleur » ne
+valide pas le modèle : sa mise en production reste une décision du responsable.
+
 ## Validation et retour arrière
 
 ```sh
 npm ci
 node tests/backtest.mjs
+node tests/dixon-coles.mjs
+node tests/backtest-2026.mjs
+node tests/margin.mjs
 npm run check
 ```
 

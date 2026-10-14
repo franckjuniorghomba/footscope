@@ -609,6 +609,31 @@ main {
 .ticketfacts dd.prob {
   color: var(--pitch-text);
 }
+/* BIS-200 : valeur face au marché. Badge descriptif ; le libellé porte le sens. */
+.valuebadge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  margin-top: var(--space-1);
+  min-width: 0;
+}
+.pick .valuebadge {
+  grid-column: 2 / -1;
+  margin-top: calc(-1 * var(--space-2));
+}
+.valuebadge .tag {
+  max-width: 100%;
+  white-space: normal;
+}
+.valuebadge small {
+  font: var(--caption);
+  color: var(--ink-subtle);
+  overflow-wrap: anywhere;
+}
+.valuefact {
+  grid-column: 1 / -1;
+}
 .ticketfacts small {
   display: block;
   font: var(--caption);
