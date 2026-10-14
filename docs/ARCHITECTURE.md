@@ -8,10 +8,10 @@ L’exécution publique est un Cloudflare Worker. Node.js sert au développement
 2. `jobs.js` parcourt les cotes paginées. Pour vingt matchs ou moins, il collecte les cotes par match ; pour un périmètre plus large, il parcourt les deux dates UTC nécessaires.
 3. Chaque match reçoit soit un motif d’exclusion, soit une analyse approfondie de ses preuves.
 4. `statistics.js` estime les événements pris en charge et applique `policy.js`.
-5. `coupon.js` compare les événements admissibles, retient un événement par match et classe les combinaisons possibles par bookmaker.
+5. `coupon.js` compare les événements admissibles, retient un événement par match et compose les tickets par bookmaker : le produit des probabilités prudentes doit rester supérieur ou égal à 0,5, avec quatre sélections maximum. Le choix entre bookmakers conserve les règles de classement et de préférence existantes.
 6. Les matchs envisagés sont revérifiés. Aucun coupon complet n’est présenté tant qu’il manque des examens.
-7. `llm.js` explique le verdict calculé. Les informations retournées ne peuvent pas changer les sélections ou le statut.
-8. `storage.js` conserve les propositions et permet le relevé des résultats.
+7. `assistant.js` transmet les probabilités combinées prudente et exploratoire, le seuil et les candidats dont l’ajout ferait passer sous le seuil. `llm.js` explique pourquoi ces sélections et pourquoi pas plus, sans inventer de chiffres ni changer le ticket ou le statut. Le prompt et la projection de l’entrée sont partagés avec `jobs.js` pour conserver exactement la requête dans le dossier de preuves. Le repère descriptif `market` sans marge est exclu de l’entrée ; les noms textuels des marchés sont conservés. Sans LLM disponible, le résumé rappelle la probabilité prudente combinée et le caractère non validé du modèle.
+8. La proposition fige `ticketProbability`, `combinedProbability = ticketProbability` et `modelVersion = MODEL_VERSION` dans l’observation. `storage.js` conserve les propositions et permet le relevé des résultats ; le suivi par ticket compare la probabilité annoncée enregistrée à l’observé sans la recalculer.
 
 ## Données et isolation
 

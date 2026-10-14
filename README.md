@@ -56,7 +56,8 @@ Les secrets sont configurés dans l’hébergement, jamais dans le dépôt ou l�
 
 - API-Football limite parfois les appels des IP de sortie partagées. Le cache, la pause et la file partagée atténuent ce problème. Un relais à IP fixe peut réduire les limitations liées aux IP partagées, sans supprimer les limites du fournisseur. Voir [la configuration du relais](docs/RELAY.md). Aucun serveur relais n’est déployé par ce correctif.
 - Toutes les rencontres du périmètre choisi sont examinées. Une première étape écarte celles sans cotes exploitables ; ce n’est pas une limite arbitraire à douze rencontres.
-- Quatre sélections maximum, une par match, chez un même bookmaker. Aucun coupon obligatoire.
+- Le ticket respecte une probabilité prudente combinée minimale de 0,5 (produit des probabilités prudentes), avec quatre sélections maximum, une par match, chez un même bookmaker. Aucun coupon obligatoire. Le LLM explique le ticket et les ajouts écartés sous le seuil ; sans clé LLM, le résumé indique la probabilité combinée. Cette probabilité vient d’un modèle exploratoire non validé et ne modélise pas la dépendance entre matchs.
+- À la proposition, `ticketProbability`, sa valeur de suivi `combinedProbability` et `modelVersion` sont enregistrées avec le ticket. Le suivi utilise la probabilité annoncée enregistrée, sans recalcul.
 - Le Poisson indépendant ne corrige pas encore la force des adversaires ni les effets des absences. La sensibilité prudente n’est pas un intervalle de confiance calibré.
 - Cartons, corners et joueurs ne disposent pas de modèles automatiquement admissibles.
 - Les analyses et le relevé des résultats peuvent être lancés par le script `scripts/update-live.mjs`. Aucun ordonnanceur autonome n’est activé par ces fichiers.

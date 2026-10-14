@@ -4,7 +4,8 @@
 import assert from 'node:assert/strict';
 import { assistant } from '../src/server/assistant.js';
 import { BELOW_THRESHOLD_REASON, NO_CANDIDATE_REASON } from '../src/server/coupon.js';
-import { POLICY } from '../src/server/policy.js';
+import { POLICY, MODEL_VERSION } from '../src/server/policy.js';
+import { buildLlmInput, LLM_INSTRUCTIONS } from '../src/server/llm.js';
 
 const now = Date.parse('2030-01-01T12:00:00Z');
 Date.now = () => now;
@@ -55,6 +56,10 @@ globalThis.fetch = async (url, options) => {
     summary: 'Explication simulée',
     selections: [{ matchId: 999 }],
     ticketProbability: 1,
+    combinedProbability: 1,
+    modelVersion: 'invented',
+    modelValidated: true,
+    realMoneyEligible: true,
     noTicketReason: null,
     reasons: [],
     risks: [],
@@ -131,10 +136,68 @@ assert.deepEqual(
   [1, 2],
 );
 assert.equal(strongInput.modelValidated, false);
+assert.equal(strongInput.ticketProbability, strongInput.combinedProbability);
+assert.equal(strongInput.modelVersion, MODEL_VERSION);
+assert.deepEqual(
+  strongInput.excludedCandidates.map((e) => e.matchId),
+  [3, 4, 5],
+);
+for (const e of strongInput.excludedCandidates) {
+  assert.equal(e.prudentProbability, 0.72);
+  assert.equal(e.probability, 0.77);
+  assert(close(e.ticketProbabilityIfAdded, 0.648 * 0.72));
+  assert(e.ticketProbabilityIfAdded < 0.5);
+  assert.equal(e.reason, 'TICKET_PROBABILITY_BELOW_THRESHOLD');
+}
+assert.match(LLM_INSTRUCTIONS, /minTicketProbability \(0,5/);
+assert(!LLM_INSTRUCTIONS.includes('Au plus quatre sélections, pas de coupon obligatoire.'));
+assert.match(LLM_INSTRUCTIONS, /n’invente aucun chiffre/);
 // La réponse enregistrée porte les mêmes valeurs que la réponse API.
 const saved = [...db.entries()].find(([k]) => k.startsWith('observations/'));
 assert(saved, 'Proposition enregistrée');
 for (const f of fields) assert.equal(JSON.parse(saved[1])[f], strong[f]);
+const recorded = JSON.parse(saved[1]);
+assert.equal(recorded.combinedProbability, strong.ticketProbability);
+assert.equal(recorded.modelVersion, MODEL_VERSION);
+assert.equal(recorded.modelValidated, false);
+assert.equal(recorded.realMoneyEligible, false);
+assert.deepEqual(recorded.excludedCandidates, strongInput.excludedCandidates);
+
+// Le repère sans marge est descriptif : seuls les noms de marchés peuvent passer.
+const projected = buildLlmInput({
+  ...strong,
+  market: { probability: 0.999, sentinel: 'descriptive-only' },
+  reports: [{ market: { sentinel: 'descriptive-only' } }],
+  reviews: [{ matchId: 9, market: { sentinel: 'descriptive-only' } }],
+});
+assert(!JSON.stringify(projected).includes('descriptive-only'));
+assert.equal(projected.selections[0].market, 'Goals Over/Under');
+assert(!('engine' in projected));
+
+// Sans clé, le ticket garde sa probabilité et un résumé chiffré prudent.
+const fallback = await proposed(universe([0.9, 0.72, 0.72]), { BUCKET: bucket });
+assert.equal(fallback.engine, 'statistics');
+assert.match(fallback.summary, /Probabilité prudente combinée.*64,8 %.*50 %/);
+assert.match(fallback.summary, /non validé/);
+assert.equal(llmCalls.length, 0);
+
+// Ne pas présenter un autre bookmaker, un autre événement du même match,
+// une preuve périmée ou un événement refusé comme un ajout possible.
+const excludedScope = await proposed([
+  report(1, [event(1, 0.9), event(1, 0.8)]),
+  report(2, [event(2, 0.72)]),
+  report(3, [event(3, 0.72), event(3, 0.6)]),
+  report(4, [event(4, 0.7, { bookmaker: 'Other' })]),
+  report(5, [event(5, 0.7, { status: 'reject' })]),
+  { ...report(6, [event(6, 0.7)]), retrievedAt: timestamp(-16 * 60000) },
+  report(7, [event(7, 0.7, { updated: timestamp(-POLICY.maxOddsAgeMs - 1) })]),
+  report(8, [event(8, 0.7, { updated: timestamp(300001) })]),
+  report(9, [event(9, NaN)]),
+]);
+assert.deepEqual(
+  excludedScope.excludedCandidates.map((e) => e.matchId),
+  [3],
+);
 
 // Produit exactement au seuil : 1 × 0,8 × 0,625 = 0,5, accepté.
 const exact = await proposed(universe([1, 0.8, 0.625]));
@@ -155,6 +218,10 @@ assert.equal(llmCalls[0].noTicketReason, BELOW_THRESHOLD_REASON);
 assert.equal(llmCalls[0].ticketProbability, null);
 assert.deepEqual(llmCalls[0].selections, []);
 assert.deepEqual(weak.selections, [], 'Le LLM ne crée pas de ticket');
+assert.deepEqual(
+  weak.excludedCandidates.map((e) => e.prudentProbability),
+  [0.49, 0.45],
+);
 
 // Juste sous le seuil, sans LLM configuré : le résumé est le motif du seuil, pas un message générique.
 const noLlm = await proposed(universe([0.4999999]), { BUCKET: bucket });
@@ -171,6 +238,22 @@ assert.equal(llmDown.engine, 'statistics');
 assert.equal(llmDown.summary, BELOW_THRESHOLD_REASON);
 globalThis.fetch = failingFetch;
 
+// Un échec HTTP, une réponse illisible ou un timeout gardent la probabilité dans le repli.
+for (const fetchFailure of [
+  async () => Response.json({ error: { code: 'server_error' } }, { status: 500 }),
+  async () => Response.json({ output: [{ content: [{ type: 'output_text', text: 'invalid' }] }] }),
+  async () => {
+    throw Error('Simulated timeout');
+  },
+]) {
+  globalThis.fetch = fetchFailure;
+  const down = await proposed(universe([0.9, 0.72]));
+  assert.equal(down.engine, 'statistics');
+  assert.match(down.summary, /64,8 %/);
+  assert.equal(down.ticketProbability, 0.648);
+}
+globalThis.fetch = failingFetch;
+
 // Aucun événement admissible : motif « aucun candidat », sans appel au LLM.
 const empty = await proposed([report(1, [])]);
 assert.deepEqual(empty.selections, []);
@@ -185,6 +268,9 @@ assert.deepEqual(
   ties.selections.map((e) => e.matchId),
   [1, 2, 3, 4],
 );
+const capped = await proposed(universe([0.99, 0.99, 0.99, 0.99, 0.99]));
+assert.equal(capped.selections.length, 4);
+assert.deepEqual(capped.excludedCandidates, [], 'Le plafond seul ne devient pas un refus de seuil');
 assert(close(ties.ticketProbability, 0.85 ** 4));
 assert.deepEqual(
   (await proposed(universe([0.85, 0.85, 0.85, 0.85, 0.85]))).selections.map((e) => e.matchId),
