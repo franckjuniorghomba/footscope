@@ -4,6 +4,15 @@ import { POLICY, MODEL_VERSION } from '../../src/server/policy.js';
 import { settledOutcome } from '../../src/server/storage.js';
 import { defaultPlan, dayStart, fixedDay, validateDataset, validatePlan } from './data.mjs';
 import { bootstrapDays, scores, scoreIntervals, ticketSummary } from './metrics.mjs';
+import {
+  DIXON_COLES_GRID,
+  DIXON_COLES_VERSION,
+  LOW_HISTORY_MATCHES,
+  RHO_BOUND,
+  SELECTION_RULE,
+  createDixonColes,
+  selectDixonColes,
+} from './dixon-coles.mjs';
 
 export const EVENTS = [
   ['Match Winner', 'Home'],
@@ -57,6 +66,9 @@ export function runBacktest(dataset, plan = dataset.plan || defaultPlan) {
   }
   const histories = new Map(),
     naiveCounts = new Map();
+  // BIS-183 : (ξ, ridge) figés sur la saison de développement avant toute lecture du test.
+  const dixonColesSelection = selectDixonColes(fixtures, plan);
+  const dixonColes = createDixonColes(dixonColesSelection.chosen);
   const phases = { development: [], test: [] };
   const coverage = {
     input: fixtures.length,
@@ -117,6 +129,12 @@ export function runBacktest(dataset, plan = dataset.plan || defaultPlan) {
           exclude('insufficient_history');
           continue;
         }
+        // Mêmes événements pour tous les modèles : un échec Dixon-Coles exclut la rencontre.
+        const dc = dixonColes.predict(f, day);
+        if (dc.reason) {
+          exclude(dc.reason);
+          continue;
+        }
         const recent = [h, a].every(
           (xs) => now - xs.at(-1).fixture.timestamp * 1000 <= POLICY.maxRecentAgeDays * 86400000,
         );
@@ -152,6 +170,7 @@ export function runBacktest(dataset, plan = dataset.plan || defaultPlan) {
             probability,
             prudentProbability,
             naiveProbability,
+            dixonColesProbability: dc.probability(market, selection),
             won: Number(settledOutcome(event, f)),
             researchCandidate: recent && probability >= POLICY.minProbability,
             modelValidated: false,
@@ -191,6 +210,7 @@ export function runBacktest(dataset, plan = dataset.plan || defaultPlan) {
             probability: coupon.ticketProbabilityExploratory,
             prudentProbability: coupon.ticketProbability,
             naiveProbability: product(selections, 'naiveProbability'),
+            dixonColesProbability: product(selections, 'dixonColesProbability'),
             modelValidated: false,
             realMoneyEligible: false,
           }
@@ -204,6 +224,7 @@ export function runBacktest(dataset, plan = dataset.plan || defaultPlan) {
       });
     }
     // Apprentissage seulement après TOUTES les prédictions de la journée GMT−5.
+    for (const f of matches) dixonColes.learn(f);
     for (const f of matches)
       if (f.fixture.status.short === 'FT') {
         for (const side of ['home', 'away']) {
@@ -241,6 +262,7 @@ export function runBacktest(dataset, plan = dataset.plan || defaultPlan) {
               poisson: scores(group, 'probability'),
               prudent: scores(group, 'prudentProbability'),
               naive: scores(group, 'naiveProbability'),
+              dixonColes: scores(group, 'dixonColesProbability'),
               intervals: scoreIntervals(days, m, scope, plan.bootstrapReplicates, plan.seed),
             },
           ];
@@ -256,9 +278,14 @@ export function runBacktest(dataset, plan = dataset.plan || defaultPlan) {
           announced: stats.announced,
           exploratory: stats.exploratory,
           naive: stats.naive,
+          dixonColes: stats.dixonColes,
           gap: stats.gap,
           naiveGap: stats.naiveGap,
+          dixonColesGap: stats.dixonColesGap,
           brierDifference: ts.length ? stats.poissonScores.brier - stats.naiveScores.brier : null,
+          dixonColesBrierDifference: ts.length
+            ? stats.dixonColesScores.brier - stats.poissonScores.brier
+            : null,
         };
       },
       plan.bootstrapReplicates,
@@ -281,6 +308,16 @@ export function runBacktest(dataset, plan = dataset.plan || defaultPlan) {
     modelVersion: MODEL_VERSION,
     plan,
     coverage,
+    dixonColes: {
+      version: DIXON_COLES_VERSION,
+      grid: DIXON_COLES_GRID,
+      selectionRule: SELECTION_RULE,
+      lowHistoryMatches: LOW_HISTORY_MATCHES,
+      rhoBound: RHO_BOUND,
+      chosen: dixonColesSelection.chosen,
+      developmentGrid: dixonColesSelection.grid,
+      stats: dixonColes.stats,
+    },
     modelValidated: false,
     realMoneyEligible: false,
     deferred: {
@@ -294,6 +331,7 @@ export function runBacktest(dataset, plan = dataset.plan || defaultPlan) {
       'Historique limité aux ligues et saisons collectées ; exclusion des statuts autres que FT, sans prolongation ni tirs au but.',
       'Photographie à 00:00 GMT−5 ; aucun résultat de la journée ne nourrit ses prédictions ; corrections rétrospectives non datées.',
       'Le modèle naïf prédit les mêmes événements et les mêmes jambes ; son taux observé est celui de ces mêmes tickets.',
+      'Dixon-Coles évalué sur les jambes choisies par le sélecteur Poisson ; il ne compose pas ses propres tickets.',
       'Petit effectif ou une seule journée : IC absent ou peu informatif ; les données synthétiques ne valident aucun modèle.',
     ],
     development: summarizePhase(phases.development),
