@@ -86,6 +86,20 @@ export function markdownReport(report) {
     '',
     `Entrée : ${report.coverage.input} rencontres, dont ${report.coverage.completed} FT. Toutes les rencontres du périmètre sont parcourues.`,
     '',
+    `Rencontres à partir de ${report.plan.testEnd}, ni évaluées ni apprises : ${report.coverage.afterTestEnd.count}${
+      Object.keys(report.coverage.afterTestEnd.byStatus).length
+        ? ` (${Object.entries(report.coverage.afterTestEnd.byStatus)
+            .map(([k, v]) => `${k} : ${v}`)
+            .join(', ')})`
+        : ''
+    }.`,
+    '',
+    ...(report.sources
+      ? [
+          `Période neuve (BIS-185) : historique \`${report.sources.history.sha256}\` pour l’apprentissage, jeu \`${report.sources.current.sha256}\` collecté le ${report.sources.current.collectedAt}.`,
+          '',
+        ]
+      : []),
     'Brier et log-loss sont des scores binaires moyens par événement, y compris les issues qui se chevauchent en double chance. Les classes de calibration ont une largeur de 0,1 ; la dernière inclut 1. Le bornage de la log-loss est 10⁻¹².',
     '',
     'Un ticket au plus par journée de rencontres GMT−5. Référence naïve : fréquences passées de la ligue avec Laplace ; comparaison sur les mêmes événements et les mêmes jambes. Les résultats du jour ne sont appris qu’après toutes ses prédictions.',

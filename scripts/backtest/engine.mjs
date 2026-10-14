@@ -2,7 +2,7 @@ import { assessMatch, eventProbability } from '../../src/server/statistics.js';
 import { selectCouponDetailed } from '../../src/server/coupon.js';
 import { POLICY, MODEL_VERSION } from '../../src/server/policy.js';
 import { settledOutcome } from '../../src/server/storage.js';
-import { defaultPlan, dayStart, fixedDay, validateDataset, validatePlan } from './data.mjs';
+import { defaultPlan, dayStart, fixedDay, hex64, validateDataset, validatePlan } from './data.mjs';
 import { bootstrapDays, scores, scoreIntervals, ticketSummary } from './metrics.mjs';
 import {
   DIXON_COLES_GRID,
@@ -45,9 +45,19 @@ export function forecast(model, market, selection) {
 const product = (rows, key) => rows.reduce((p, r) => p * r[key], 1);
 const teamKey = (f, side) => `${f.league.id}:${f.teams[side].id}`;
 
-export function runBacktest(dataset, plan = dataset.plan || defaultPlan) {
+// `analysis` : jeu combiné dont run.mjs a vérifié les deux sommes (périmètre jusqu'à 40 couples).
+export function runBacktest(
+  dataset,
+  plan = dataset.plan || defaultPlan,
+  { analysis = false } = {},
+) {
   validateDataset(dataset);
-  validatePlan(plan);
+  if (
+    analysis &&
+    ![dataset.sources?.history?.sha256, dataset.sources?.current?.sha256].every(hex64)
+  )
+    throw Error('Périmètre d’analyse réservé à un jeu combiné aux sommes vérifiées.');
+  validatePlan(plan, { analysis });
   if (
     dataset.fixtures.some(
       (f) => !plan.leagues.includes(f.league.id) || !plan.seasons.includes(f.league.season),
@@ -57,10 +67,17 @@ export function runBacktest(dataset, plan = dataset.plan || defaultPlan) {
   const fixtures = [...dataset.fixtures].sort(
     (a, b) => a.fixture.timestamp - b.fixture.timestamp || a.fixture.id - b.fixture.id,
   );
-  const batches = new Map();
+  const batches = new Map(),
+    afterTestEnd = { count: 0, byStatus: {} };
   for (const f of fixtures) {
     const day = fixedDay(f.fixture.date);
-    if (day >= plan.testEnd) continue;
+    // Ni évaluées ni apprises : matchs à venir d'une saison en cours, ou postérieurs au plan.
+    if (day >= plan.testEnd) {
+      afterTestEnd.count++;
+      const status = f.fixture.status.short;
+      afterTestEnd.byStatus[status] = (afterTestEnd.byStatus[status] || 0) + 1;
+      continue;
+    }
     if (!batches.has(day)) batches.set(day, []);
     batches.get(day).push(f);
   }
@@ -75,6 +92,7 @@ export function runBacktest(dataset, plan = dataset.plan || defaultPlan) {
     completed: fixtures.filter((f) => f.fixture.status.short === 'FT').length,
     byLeagueSeason: {},
     exclusions: {},
+    afterTestEnd,
   };
   for (const f of fixtures) {
     const key = `${f.league.id}-${f.league.season}`;

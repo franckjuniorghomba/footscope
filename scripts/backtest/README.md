@@ -77,6 +77,120 @@ réessayer. Après un arrêt brutal, vérifier que le processus est terminé ava
 retirer manuellement `collect.lock` et `<registre>.lock`. Ne pas lancer simultanément une autre collecte
 payante avec la même clé ; la coordination des appels du Worker demeure inchangée.
 
+## Période test neuve : saison 2026/27 (BIS-185)
+
+`plan-2026.json` est un second plan figé : les dix mêmes ligues, saison 2026
+seulement, soit **dix couples et dix appels au plus**. Il n'est utilisé que si
+`--plan` est passé explicitement au collecteur. Sans `--plan`, le collecteur
+utilise `plan.json`, avec le même `planHash` (`f41afaad…`) et le même jeu.
+Le plan 2026 a son propre `planHash`, et donc son propre journal, dans son propre
+dossier `--out`. Il ne touche jamais au jeu 2023-2025, dont il épingle la somme
+(`history.sha256 = 7101245773e9…`) et le plan.
+
+`testEnd` vaut `collection-day` : le collecteur écrit dans `dataset.json` la date
+de la **première** tentative de son journal (`collection.collectedAt`) et la
+journée GMT−5 correspondante (`collection.testEnd`, exclue). Seules les journées
+antérieures, complètes dans chaque fichier, sont évaluées. La date ne bouge pas lors
+d'une reprise depuis le cache. Les statuts collectés sont comptés
+(`collection.statuses`). Les matchs non joués (NS…) et ceux de la journée de
+collecte ou d'après ne sont ni évalués ni appris. Leur nombre figure dans
+`coverage.afterTestEnd` ; les non-FT antérieurs sont exclus avec le motif `non_final`.
+
+`coverage.afterTestEnd` (`{ count, byStatus }`) est un champ **ajouté** à tous les
+rapports, y compris celui du plan par défaut. Il compte, par statut, les rencontres
+datées de `testEnd` ou après. Pour le jeu BIS-167 (`7101245773e9…`), il vaut
+`{ "count": 0, "byStatus": {} }`. Les autres champs, statistiques, prédictions et
+tickets restent identiques, hors `elapsedMs` et `maxRssKiB`. Un lecteur de l'ancien
+format peut l'ignorer.
+
+Limite de collecte et périmètre d'analyse sont distincts. Un plan de collecte
+demande au plus 30 couples (`MAX_CALLS`, inchangé) et seul le registre autorise
+les appels. Le plan combiné par `run.mjs --history` (dix ligues × 2023-2026, soit
+40 couples) n'est accepté que par le runner, après vérification des sommes de
+collecte des deux jeux ; il ne déclenche aucun appel.
+
+### Commande à lancer par l'humain (autorisation de dix appels)
+
+Le registre partagé est plein (30/30). Il n'est jamais remis à zéro
+automatiquement : l'humain l'archive, puis l'initialise à `--used 20`, ce qui
+permet exactement dix appels. Depuis la racine du checkout :
+
+```sh
+export BACKTEST_BUDGET_FILE=/root/.local/share/jarvis/livrables/footscope/BIS-167/budget-api-football.json
+export JARVIS_LIVRABLES=/root/.local/share/jarvis/livrables/footscope/BIS-185
+ARCHIVE=/root/.local/share/jarvis/livrables/footscope/BIS-167/budget-api-football-bis167-30-appels.json
+# Sous-shell à arrêt immédiat : le premier échec arrête tout, avant saisie et réseau.
+# La clé n'existe que dans ce sous-shell ; son code de sortie reste dans $?.
+(
+  set -eu
+  # 1. Aucun collecteur actif, aucun verrou, archive absente.
+  if pgrep -f '[s]cripts/backtest/collect.mjs' >/dev/null; then
+    echo 'Collecteur actif : arrêt, aucune modification.' >&2
+    exit 1
+  fi
+  test ! -e "$BACKTEST_BUDGET_FILE.lock"
+  test ! -e "$ARCHIVE"
+  # 2. Archiver (déplacement, sans suppression) puis initialiser au même chemin.
+  mv -n "$BACKTEST_BUDGET_FILE" "$ARCHIVE"
+  test -e "$ARCHIVE"
+  test ! -e "$BACKTEST_BUDGET_FILE"
+  node scripts/backtest/budget.mjs --used 20 \
+    --reason "BIS-185 : 10 appels autorisés pour la saison 2026 ; registre précédent archivé (30/30)"
+  # 3. Clé saisie sans écho, jamais dans l'historique ni dans un fichier ; vide = arrêt.
+  read -rsp 'Clé API-Football : ' API_FOOTBALL_KEY
+  echo >&2
+  test -n "$API_FOOTBALL_KEY"
+  export API_FOOTBALL_KEY
+  node scripts/backtest/collect.mjs --plan scripts/backtest/plan-2026.json \
+    --out "$JARVIS_LIVRABLES/api-football-2026"
+)
+```
+
+Le bloc entier est une seule unité. Il s'arrête avec un code non nul, **sans aucun
+appel**, si un collecteur est actif, si un verrou ou l'archive existe, si le
+déplacement ou l'initialisation échoue, ou si la saisie de clé échoue ou est vide.
+L'archive existante n'est jamais écrasée. La clé disparaît avec le sous-shell, que
+la collecte réussisse ou non ; `echo $?` donne ensuite le code du premier échec.
+Après un arrêt à l'étape 3, ne pas relancer ce bloc : l'archive existe et il
+refuserait. Relancer seulement l'étape 3 dans un sous-shell, avec la même commande
+`collect.mjs`.
+
+La sortie JSON donne le nombre d'appels, la somme du jeu, `testEnd` et les statuts.
+Une interruption se reprend par la même commande `collect.mjs` (cache vérifié,
+sans nouvelle initialisation). Un refus du fournisseur (abonnement sans la saison
+2026, réponse vide ou paginée) consomme sa tentative et doit être signalé tel quel,
+sans annoncer de résultat. Après cette initialisation, l'ancien dossier
+`api-football` ne peut plus être _recollecté_ (son journal est absent du nouveau
+registre). Le runner continue de le lire, car il vérifie seulement ses sommes.
+
+### Évaluer la période neuve (seulement après le gel de la marge BIS-184)
+
+Ne lancer qu'une fois la marge de prudence BIS-184 figée : la période neuve ne
+doit être lue qu'une fois.
+
+```sh
+node scripts/backtest/run.mjs \
+  --input "$JARVIS_LIVRABLES/api-football-2026/dataset.json" \
+  --history /root/.local/share/jarvis/livrables/footscope/BIS-167/api-football/dataset.json \
+  --out "$JARVIS_LIVRABLES/historical-2026"
+```
+
+`--history` est obligatoire pour un jeu à période neuve, et refusé sinon. Le runner
+vérifie les deux sommes de collecte, puis que l'historique est bien celui épinglé par
+le plan (somme et `planHash`). Il vérifie aussi les ligues identiques, les saisons
+disjointes et l'absence de rencontre de l'historique à partir de `testStart`. Il
+contrôle la date de collecte et refuse toute rencontre présente dans les deux jeux.
+Le plan résolu couvre les saisons 2023 à 2026 : développement (choix de ξ et ridge
+Dixon-Coles) du 2025-07-01 au 2026-06-30, puis test du 2026-07-01 à `testEnd`.
+L'apprentissage reprend tout l'historique antérieur, journée par journée. Le
+rapport cite les deux sommes dans `sources`.
+
+Retour arrière : aucune migration ni donnée de production. Pour revenir à l'état
+antérieur, arrêter le collecteur. Déplacer ensuite le nouveau registre vers une
+seconde archive, sans le supprimer, puis remettre l'archive 30/30 à sa place. Le
+budget redevient alors plein, ce qui reste plus restrictif. Le jeu 2023-2025 n'est
+jamais modifié.
+
 ### Initialisation, reprise des anciens caches et réinitialisation
 
 `budget.mjs --used N --reason "motif écrit sans secret"` est une action manuelle
@@ -167,6 +281,7 @@ valide pas le modèle : sa mise en production reste une décision du responsable
 npm ci
 node tests/backtest.mjs
 node tests/dixon-coles.mjs
+node tests/backtest-2026.mjs
 npm run check
 ```
 
