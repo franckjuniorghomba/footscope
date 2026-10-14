@@ -70,15 +70,47 @@ export function blockedReport(f, reason) {
 export function selectCoupon(reports, now = Date.now()) {
   return selectCouponDetailed(reports, now).selections;
 }
-// scoreGap : perte relative de probabilité du coupon préféré face au meilleur,
-// ou null si les tailles diffèrent ou si aucun coupon préféré n'est disponible.
-// Sans sélection : bookmaker null, used false, unavailable true, scoreGap null.
+export const NO_CANDIDATE_REASON = 'Aucun événement admissible : aucun ticket proposé.';
+export const BELOW_THRESHOLD_REASON =
+  'Aucune sélection n’atteint seule une probabilité prudente de ' +
+  Math.round(POLICY.minTicketProbability * 100) +
+  ' % : aucun ticket proposé.';
+// Produit d'un champ de probabilité ; null si le ticket est vide ou si une valeur manque.
+const product = (selections, field) =>
+  selections.length && selections.every((e) => Number.isFinite(e[field]))
+    ? selections.reduce((p, e) => p * e[field], 1)
+    : null;
+// Composition gloutonne et déterministe : candidats triés par probabilité prudente
+// décroissante, ajoutés tant que le produit reste au-dessus du seuil, quatre au plus.
+// Les candidats étant triés, le premier refus rend tous les suivants impossibles.
+function composeTicket(candidates) {
+  const ticket = [];
+  let probability = 1;
+  for (const e of candidates) {
+    const next = probability * e.prudentProbability;
+    if (ticket.length >= POLICY.maxSelections || next < POLICY.minTicketProbability) break;
+    ticket.push(e);
+    probability = next;
+  }
+  return ticket;
+}
+// Entre bookmakers : le plus grand ticket qui respecte le seuil, puis la probabilité combinée.
+// scoreGap : perte relative de probabilité du ticket préféré face au meilleur,
+// ou null si les tailles diffèrent ou si aucun ticket préféré n'est disponible.
+// Le ticket préféré respecte déjà le seuil : la tolérance ne le fait jamais passer dessous.
+// Sans sélection : bookmaker null, used false, unavailable true, scoreGap et
+// probabilités null, noTicketReason renseigné.
 export function selectCouponDetailed(reports, now = Date.now()) {
   const valid = (e) =>
     e.status === 'simulation_eligible' &&
+    Number.isFinite(e.prudentProbability) &&
+    e.prudentProbability > 0 &&
+    e.prudentProbability <= 1 &&
     Date.parse(e.kickoff) > now &&
     now - Date.parse(e.updated) <= POLICY.maxOddsAgeMs &&
     now - Date.parse(e.updated) >= -300000;
+  const byProbability = (a, b) =>
+    b.prudentProbability - a.prudentProbability || b.prudentEdge - a.prudentEdge;
   const books = [
     ...new Set(
       reports.flatMap((r) => r.events.filter(valid).map((e) => bookmakerKey(e.bookmaker))),
@@ -86,28 +118,34 @@ export function selectCouponDetailed(reports, now = Date.now()) {
   ];
   let best = [];
   let preferred = [];
-  const score = (x) => x.reduce((s, e) => s + Math.log(Math.max(e.prudentProbability, 1e-9)), 0);
+  let candidatesSeen = false;
   for (const book of books) {
-    const choices = reports
+    const candidates = reports
       .flatMap((r) => {
         if (now - Date.parse(r.retrievedAt) > 15 * 60000) return [];
         return r.events
           .filter((e) => bookmakerKey(e.bookmaker) === book && valid(e))
-          .sort(
-            (a, b) => b.prudentProbability - a.prudentProbability || b.prudentEdge - a.prudentEdge,
-          )
+          .sort(byProbability)
           .slice(0, 1);
       })
-      .sort((a, b) => b.prudentProbability - a.prudentProbability || b.prudentEdge - a.prudentEdge)
-      .slice(0, 4);
-    if (book === PREFERRED_BOOKMAKER) preferred = choices;
+      .sort(byProbability);
+    // Un match peut apparaître dans deux rapports : on garde sa meilleure sélection.
+    const perMatch = new Map();
+    for (const e of candidates) if (!perMatch.has(e.matchId)) perMatch.set(e.matchId, e);
+    if (perMatch.size) candidatesSeen = true;
+    const ticket = composeTicket([...perMatch.values()]);
+    if (book === PREFERRED_BOOKMAKER) preferred = ticket;
     if (
-      choices.length > best.length ||
-      (choices.length === best.length && score(choices) > score(best))
+      ticket.length > best.length ||
+      (ticket.length === best.length &&
+        ticket.length > 0 &&
+        product(ticket, 'prudentProbability') > product(best, 'prudentProbability'))
     )
-      best = choices;
+      best = ticket;
   }
   const comparable = preferred.length > 0 && preferred.length === best.length;
+  // Ratio en logarithmes, comme la tolérance de la PR n° 6 : même arrondi à la borne de 90 %.
+  const score = (x) => x.reduce((s, e) => s + Math.log(e.prudentProbability), 0);
   const ratio = comparable ? Math.exp(score(preferred) - score(best)) : null;
   const preferredBookmakerUsed = comparable && ratio + Number.EPSILON >= PREFERRED_TOLERANCE;
   const selections = preferredBookmakerUsed ? preferred : best;
@@ -117,5 +155,15 @@ export function selectCouponDetailed(reports, now = Date.now()) {
     preferredBookmakerUsed,
     preferredBookmakerUnavailable: !preferredBookmakerUsed,
     scoreGap: comparable ? Math.max(0, 1 - ratio) : null,
+    ticketProbability: product(selections, 'prudentProbability'),
+    ticketProbabilityExploratory: product(selections, 'probability'),
+    minTicketProbability: POLICY.minTicketProbability,
+    noTicketReason: selections.length
+      ? null
+      : candidatesSeen
+        ? BELOW_THRESHOLD_REASON
+        : NO_CANDIDATE_REASON,
+    modelValidated: false,
+    realMoneyEligible: false,
   };
 }
