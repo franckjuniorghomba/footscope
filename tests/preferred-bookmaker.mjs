@@ -72,6 +72,13 @@ for (const name of ['Bet365', 'bet365', '  Bet365  ']) {
   assert.equal(result.bookmaker, PREFERRED_BOOKMAKER);
   assert.equal(result.preferredBookmakerUsed, true);
 }
+for (const name of ['notbet365', 'Bet365x']) {
+  const result = verifyWrapper(reportsFor(0.95, 4, name));
+  assert.equal(result.bookmaker, 'Other');
+  assert.equal(result.preferredBookmakerUsed, false);
+  assert.equal(result.preferredBookmakerUnavailable, true);
+  assert.equal(result.scoreGap, null);
+}
 const mixed = reportsFor(0.95);
 mixed[1].events[1].bookmaker = 'bet365';
 mixed[2].events[1].bookmaker = ' Bet365 ';
@@ -218,6 +225,11 @@ assert.equal(preferredBookIndex(books), 2);
 assert.equal(preferredBookIndex([{ name: 'First' }]), 0);
 assert.equal(preferredBookIndex([{ name: 'Other' }, { name: ' bet365 ' }]), 1);
 assert.equal(preferredBookIndex([]), 0);
+for (const name of ['notbet365', 'Bet365x']) {
+  assert.equal(preferredBookIndex([{ name: 'Other' }, { name }]), 0);
+  assert.equal(preferredBookIndex([{ name }, { name: 'Bet365' }]), 1);
+}
+assert.equal(preferredBookIndex([{}, { name: 'Bet365' }]), 1);
 await vm.runInContext('detail(7)', context);
 assert.equal(node('#book').value, '2');
 assert.match(node('#book').innerHTML, /option value="2">Bet365/);
@@ -238,6 +250,16 @@ assert.equal(node('#book').value, '0');
 books = [];
 await vm.runInContext('detail(9)', context);
 assert.match(node('#marketTable').innerHTML, /Aucune cote retournée/);
+books = [{ bets: [] }, { name: 'Bet365', bets: [] }];
+await vm.runInContext('detail(10)', context);
+assert.doesNotMatch(node('#details').innerHTML, /id="detailError"/);
+assert.match(node('#details').innerHTML, /id="marketTable"/);
+assert.equal(node('#book').value, '1', 'Bet365 reste présélectionné malgré le nom absent');
+node('#book').value = '0';
+assert.doesNotThrow(() => node('#book').onchange());
+await vm.runInContext('detail(10)', context);
+assert.doesNotMatch(node('#details').innerHTML, /id="detailError"/);
+assert.equal(node('#book').value, '0', 'Le choix manuel sans nom survit au nouveau rendu');
 console.log(
-  'Passed: preferred bookmaker 95%/80%/90% boundary, size, refusals, empty contract, casing, legacy fixtures, wrapper and manual selector preservation.',
+  'Passed: preferred bookmaker 95%/80%/90% boundary, size, refusals, empty contract, casing, legacy fixtures, wrapper, exact names, nameless bookmaker and manual selector preservation.',
 );

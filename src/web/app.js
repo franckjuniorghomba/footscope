@@ -368,8 +368,14 @@ $('#matches').onclick = (e) => {
   if (b) detail(b.dataset.match);
 };
 // Export global du script classique, utilisable sans DOM ni effet de bord.
+// 'bet365' correspond à PREFERRED_BOOKMAKER dans src/server/coupon.js, normalisé en minuscules.
 function preferredBookIndex(books) {
-  const index = books.findIndex((book) => book.name?.trim().toLowerCase() === 'bet365');
+  const index = books.findIndex(
+    (book) =>
+      String(book?.name ?? '')
+        .trim()
+        .toLowerCase() === 'bet365',
+  );
   return index < 0 ? 0 : index;
 }
 const manualBookChoices = new Map();
@@ -462,11 +468,22 @@ async function detail(id, attempt = 0) {
       ? books.map((x, i) => '<option value="' + i + '">' + esc(x.name) + '</option>').join('')
       : '<option>Aucune cote disponible</option>';
     const manualBook = manualBookChoices.get(String(id));
-    const manualIndex = books.findIndex((book) => book.name.trim().toLowerCase() === manualBook);
+    const manualIndex = books.findIndex(
+      (book) =>
+        String(book?.name ?? '')
+          .trim()
+          .toLowerCase() === manualBook,
+    );
     $('#book').value = String(manualIndex < 0 ? preferredBookIndex(books) : manualIndex);
     $('#book').onchange = () => {
       const book = books[Number($('#book').value)];
-      if (book) manualBookChoices.set(String(id), book.name.trim().toLowerCase());
+      if (book)
+        manualBookChoices.set(
+          String(id),
+          String(book?.name ?? '')
+            .trim()
+            .toLowerCase(),
+        );
       renderMarkets();
     };
     renderMarkets();
