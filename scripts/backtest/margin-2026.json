@@ -1,0 +1,655 @@
+{
+  "schemaVersion": 1,
+  "issue": "BIS-184",
+  "rule": {
+    "period": "saison de développement 2024/25 (2024-07-01 → 2025-06-30, GMT−5)",
+    "grid": "0 à 0,20 par pas de 0,01",
+    "condition": "tickets B composés avec m : annoncé moyen ≤ passage observé, au total et pour chaque taille comptant au moins 30 tickets",
+    "choice": "plus petit m de la grille qui remplit la condition ; à défaut, m = 0,20 (plafond, signalé)",
+    "minSizeTickets": 30
+  },
+  "margin": 0.03,
+  "ceiling": false,
+  "dixonColes": {
+    "version": "dixon-coles-v1",
+    "xi": 0.001,
+    "ridge": 16
+  },
+  "dixonColesChoice": "ξ et ridge choisis sur 2025/26 (plan-2026.json), comme le run 2026/27 ; m est mesurée avec ce même modèle",
+  "selections": {
+    "A": "Poisson prudent (sélection actuelle) : jambe si probabilité Poisson ≥ 0,7 et historique récent ; annoncé = probabilité prudente ; produit ≥ 0,5",
+    "B": "Dixon-Coles − m : jambe si probabilité Dixon-Coles ≥ 0,7 et historique récent ; annoncé = max(0, p − m) ; produit ≥ 0,5",
+    "common": "un ticket par journée GMT−5, un pari par match, quatre jambes au plus"
+  },
+  "verdictRule": "« annoncé fiable » si l’IC à 95 % de (observé − annoncé) contient 0 et |écart| < 5 points ; sinon « optimiste » (observé < annoncé) ou « pessimiste »",
+  "sources": {
+    "historySha256": "7101245773e9037bf0ec86b348f542d729eb572d841e2a554fc49851e8257f8c",
+    "historyPlanHash": "f41afaad2da70ae9c02ce129dfc2647ee4f7f6285e402a41133655d01f5c015f",
+    "plan2026Sha256": "cba2a848d503ffad10e1f0a8fb6d0c6365fdd2238372e7c881559e044b121179"
+  },
+  "development": {
+    "days": 212,
+    "matches": 3276,
+    "legErrors": {
+      "count": 5279,
+      "announced": 0.7703232452150901,
+      "observed": 0.7806402727789354,
+      "error": -0.010317027563845338,
+      "bins": [
+        {
+          "lower": 0.7,
+          "upper": 0.8,
+          "count": 3988,
+          "announced": 0.7441534548720465,
+          "observed": 0.7479939819458375,
+          "error": -0.0038405270737910113
+        },
+        {
+          "lower": 0.8,
+          "upper": 0.9,
+          "count": 1111,
+          "announced": 0.839391337699745,
+          "observed": 0.873987398739874,
+          "error": -0.03459606104012891
+        },
+        {
+          "lower": 0.9,
+          "upper": 1,
+          "count": 180,
+          "announced": 0.9238258737573138,
+          "observed": 0.9277777777777778,
+          "error": -0.00395190402046397
+        }
+      ]
+    },
+    "search": [
+      {
+        "margin": 0,
+        "tickets": 203,
+        "bySize": {
+          "1": 18,
+          "2": 56,
+          "3": 41,
+          "4": 88
+        },
+        "announced": 0.6258874000763509,
+        "observed": 0.6354679802955665,
+        "sizeChecks": [
+          {
+            "size": 2,
+            "announced": 0.6137169307919182,
+            "observed": 0.5357142857142857
+          },
+          {
+            "size": 3,
+            "announced": 0.5631892109226556,
+            "observed": 0.6829268292682927
+          },
+          {
+            "size": 4,
+            "announced": 0.627770208357705,
+            "observed": 0.6704545454545454
+          }
+        ],
+        "satisfied": false
+      },
+      {
+        "margin": 0.01,
+        "tickets": 203,
+        "bySize": {
+          "1": 18,
+          "2": 67,
+          "3": 35,
+          "4": 83
+        },
+        "announced": 0.6167185568024365,
+        "observed": 0.6502463054187192,
+        "sizeChecks": [
+          {
+            "size": 2,
+            "announced": 0.6070527802430341,
+            "observed": 0.5522388059701493
+          },
+          {
+            "size": 3,
+            "announced": 0.5708891216761418,
+            "observed": 0.7142857142857143
+          },
+          {
+            "size": 4,
+            "announced": 0.6068404022662832,
+            "observed": 0.6987951807228916
+          }
+        ],
+        "satisfied": false
+      },
+      {
+        "margin": 0.02,
+        "tickets": 203,
+        "bySize": {
+          "1": 19,
+          "2": 69,
+          "3": 41,
+          "4": 74
+        },
+        "announced": 0.6058215966478453,
+        "observed": 0.6600985221674877,
+        "sizeChecks": [
+          {
+            "size": 2,
+            "announced": 0.5957376575324739,
+            "observed": 0.5797101449275363
+          },
+          {
+            "size": 3,
+            "announced": 0.5716794819167226,
+            "observed": 0.7804878048780488
+          },
+          {
+            "size": 4,
+            "announced": 0.5910372429105901,
+            "observed": 0.6756756756756757
+          }
+        ],
+        "satisfied": false
+      },
+      {
+        "margin": 0.03,
+        "tickets": 203,
+        "bySize": {
+          "1": 21,
+          "2": 74,
+          "3": 45,
+          "4": 63
+        },
+        "announced": 0.6003665265411866,
+        "observed": 0.6798029556650246,
+        "sizeChecks": [
+          {
+            "size": 2,
+            "announced": 0.5906426856896869,
+            "observed": 0.6216216216216216
+          },
+          {
+            "size": 3,
+            "announced": 0.573875769677586,
+            "observed": 0.7777777777777778
+          },
+          {
+            "size": 4,
+            "announced": 0.5779730104390979,
+            "observed": 0.6825396825396826
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.04,
+        "tickets": 203,
+        "bySize": {
+          "1": 24,
+          "2": 77,
+          "3": 48,
+          "4": 54
+        },
+        "announced": 0.5947077533072355,
+        "observed": 0.6896551724137931,
+        "sizeChecks": [
+          {
+            "size": 2,
+            "announced": 0.5851415088241902,
+            "observed": 0.6233766233766234
+          },
+          {
+            "size": 3,
+            "announced": 0.5713481306114302,
+            "observed": 0.7916666666666666
+          },
+          {
+            "size": 4,
+            "announced": 0.5620487671030383,
+            "observed": 0.6851851851851852
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.05,
+        "tickets": 203,
+        "bySize": {
+          "1": 27,
+          "2": 79,
+          "3": 56,
+          "4": 41
+        },
+        "announced": 0.5908653475003584,
+        "observed": 0.6995073891625616,
+        "sizeChecks": [
+          {
+            "size": 2,
+            "announced": 0.5778616454851709,
+            "observed": 0.6455696202531646
+          },
+          {
+            "size": 3,
+            "announced": 0.5690511991920056,
+            "observed": 0.7321428571428571
+          },
+          {
+            "size": 4,
+            "announced": 0.5515938868714805,
+            "observed": 0.7317073170731707
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.06,
+        "tickets": 203,
+        "bySize": {
+          "1": 38,
+          "2": 69,
+          "3": 68,
+          "4": 28
+        },
+        "announced": 0.593659643581403,
+        "observed": 0.7389162561576355,
+        "sizeChecks": [
+          {
+            "size": 1,
+            "announced": 0.7217848502658842,
+            "observed": 0.7894736842105263
+          },
+          {
+            "size": 2,
+            "announced": 0.5755011602908618,
+            "observed": 0.6956521739130435
+          },
+          {
+            "size": 3,
+            "announced": 0.5611526085141951,
+            "observed": 0.7352941176470589
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.07,
+        "tickets": 203,
+        "bySize": {
+          "1": 44,
+          "2": 73,
+          "3": 69,
+          "4": 17
+        },
+        "announced": 0.5984739805037127,
+        "observed": 0.7586206896551724,
+        "sizeChecks": [
+          {
+            "size": 1,
+            "announced": 0.7127694722298769,
+            "observed": 0.7954545454545454
+          },
+          {
+            "size": 2,
+            "announced": 0.5813490772030356,
+            "observed": 0.726027397260274
+          },
+          {
+            "size": 3,
+            "announced": 0.5585437259267437,
+            "observed": 0.782608695652174
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.08,
+        "tickets": 203,
+        "bySize": {
+          "1": 49,
+          "2": 79,
+          "3": 65,
+          "4": 10
+        },
+        "announced": 0.6002311880551339,
+        "observed": 0.7635467980295566,
+        "sizeChecks": [
+          {
+            "size": 1,
+            "announced": 0.7066592816770746,
+            "observed": 0.7959183673469388
+          },
+          {
+            "size": 2,
+            "announced": 0.5816356923361484,
+            "observed": 0.7341772151898734
+          },
+          {
+            "size": 3,
+            "announced": 0.5531724671437912,
+            "observed": 0.8
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.09,
+        "tickets": 203,
+        "bySize": {
+          "1": 57,
+          "2": 84,
+          "3": 56,
+          "4": 6
+        },
+        "announced": 0.6060770797067799,
+        "observed": 0.7733990147783252,
+        "sizeChecks": [
+          {
+            "size": 1,
+            "announced": 0.7020138443562689,
+            "observed": 0.7719298245614035
+          },
+          {
+            "size": 2,
+            "announced": 0.5860625539339923,
+            "observed": 0.8095238095238095
+          },
+          {
+            "size": 3,
+            "announced": 0.5477481884152291,
+            "observed": 0.75
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.1,
+        "tickets": 203,
+        "bySize": {
+          "1": 66,
+          "2": 85,
+          "3": 50,
+          "4": 2
+        },
+        "announced": 0.6105866259531917,
+        "observed": 0.7881773399014779,
+        "sizeChecks": [
+          {
+            "size": 1,
+            "announced": 0.6962291663220588,
+            "observed": 0.7878787878787878
+          },
+          {
+            "size": 2,
+            "announced": 0.587667936922335,
+            "observed": 0.8
+          },
+          {
+            "size": 3,
+            "announced": 0.5403131630682355,
+            "observed": 0.78
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.11,
+        "tickets": 203,
+        "bySize": {
+          "1": 72,
+          "2": 93,
+          "3": 37,
+          "4": 1
+        },
+        "announced": 0.6133265882573468,
+        "observed": 0.8029556650246306,
+        "sizeChecks": [
+          {
+            "size": 1,
+            "announced": 0.6893869172684943,
+            "observed": 0.7777777777777778
+          },
+          {
+            "size": 2,
+            "announced": 0.5872059516610968,
+            "observed": 0.8064516129032258
+          },
+          {
+            "size": 3,
+            "announced": 0.5338796382931448,
+            "observed": 0.8648648648648649
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.12,
+        "tickets": 203,
+        "bySize": {
+          "1": 82,
+          "2": 96,
+          "3": 25,
+          "4": 0
+        },
+        "announced": 0.6213693934091761,
+        "observed": 0.8177339901477833,
+        "sizeChecks": [
+          {
+            "size": 1,
+            "announced": 0.6866060693165291,
+            "observed": 0.8048780487804879
+          },
+          {
+            "size": 2,
+            "announced": 0.5896136214406631,
+            "observed": 0.8229166666666666
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.13,
+        "tickets": 203,
+        "bySize": {
+          "1": 88,
+          "2": 101,
+          "3": 14,
+          "4": 0
+        },
+        "announced": 0.6224573017241976,
+        "observed": 0.8177339901477833,
+        "sizeChecks": [
+          {
+            "size": 1,
+            "announced": 0.6800406126236853,
+            "observed": 0.8068181818181818
+          },
+          {
+            "size": 2,
+            "announced": 0.5857277081570755,
+            "observed": 0.8415841584158416
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.14,
+        "tickets": 203,
+        "bySize": {
+          "1": 92,
+          "2": 104,
+          "3": 7,
+          "4": 0
+        },
+        "announced": 0.6190045083601681,
+        "observed": 0.8226600985221675,
+        "sizeChecks": [
+          {
+            "size": 1,
+            "announced": 0.6726343782378343,
+            "observed": 0.8043478260869565
+          },
+          {
+            "size": 2,
+            "announced": 0.5782569671479989,
+            "observed": 0.8461538461538461
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.15,
+        "tickets": 203,
+        "bySize": {
+          "1": 99,
+          "2": 101,
+          "3": 3,
+          "4": 0
+        },
+        "announced": 0.6163819142952333,
+        "observed": 0.8275862068965517,
+        "sizeChecks": [
+          {
+            "size": 1,
+            "announced": 0.6661053735965676,
+            "observed": 0.8181818181818182
+          },
+          {
+            "size": 2,
+            "announced": 0.5707519724810414,
+            "observed": 0.8514851485148515
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.16,
+        "tickets": 203,
+        "bySize": {
+          "1": 105,
+          "2": 97,
+          "3": 1,
+          "4": 0
+        },
+        "announced": 0.612384458628605,
+        "observed": 0.8325123152709359,
+        "sizeChecks": [
+          {
+            "size": 1,
+            "announced": 0.6607106967148302,
+            "observed": 0.8285714285714286
+          },
+          {
+            "size": 2,
+            "announced": 0.5611435185054089,
+            "observed": 0.845360824742268
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.17,
+        "tickets": 203,
+        "bySize": {
+          "1": 114,
+          "2": 89,
+          "3": 0,
+          "4": 0
+        },
+        "announced": 0.6104005320661352,
+        "observed": 0.8325123152709359,
+        "sizeChecks": [
+          {
+            "size": 1,
+            "announced": 0.6555493428639138,
+            "observed": 0.8333333333333334
+          },
+          {
+            "size": 2,
+            "announced": 0.5525694710442618,
+            "observed": 0.8314606741573034
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.18,
+        "tickets": 203,
+        "bySize": {
+          "1": 123,
+          "2": 80,
+          "3": 0,
+          "4": 0
+        },
+        "announced": 0.6081314272835437,
+        "observed": 0.8374384236453202,
+        "sizeChecks": [
+          {
+            "size": 1,
+            "announced": 0.6506193291646534,
+            "observed": 0.8455284552845529
+          },
+          {
+            "size": 2,
+            "announced": 0.5428062781413364,
+            "observed": 0.825
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.19,
+        "tickets": 203,
+        "bySize": {
+          "1": 133,
+          "2": 70,
+          "3": 0,
+          "4": 0
+        },
+        "announced": 0.6076127878299572,
+        "observed": 0.8374384236453202,
+        "sizeChecks": [
+          {
+            "size": 1,
+            "announced": 0.6467813371943121,
+            "observed": 0.8571428571428571
+          },
+          {
+            "size": 2,
+            "announced": 0.5331925440376832,
+            "observed": 0.8
+          }
+        ],
+        "satisfied": true
+      },
+      {
+        "margin": 0.2,
+        "tickets": 203,
+        "bySize": {
+          "1": 152,
+          "2": 51,
+          "3": 0,
+          "4": 0
+        },
+        "announced": 0.617781610483998,
+        "observed": 0.8571428571428571,
+        "sizeChecks": [
+          {
+            "size": 1,
+            "announced": 0.6479180629522227,
+            "observed": 0.8618421052631579
+          },
+          {
+            "size": 2,
+            "announced": 0.5279631639120347,
+            "observed": 0.8431372549019608
+          }
+        ],
+        "satisfied": true
+      }
+    ]
+  },
+  "modelValidated": false,
+  "realMoneyEligible": false
+}
