@@ -7,6 +7,8 @@ import {
   sourceStamp,
   redactEvidence,
   ticketDecision,
+  EVIDENCE_LIMITS,
+  boundedEvidence,
 } from './evidence.js';
 import { assessMatch } from './statistics.js';
 import {
@@ -19,12 +21,12 @@ import {
 
 const proposals = new WeakMap();
 const uuidPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
-const evidencePageSize = 100;
+const evidencePageSize = EVIDENCE_LIMITS.pageSize;
 function evidenceError(code, status, message) {
   return Object.assign(Error(message), { code, status });
 }
 async function storeSnapshot(env, job, fixture, snapshot) {
-  const text = JSON.stringify(snapshot);
+  const text = boundedEvidence(snapshot, EVIDENCE_LIMITS.snapshotBytes);
   const digest = Array.from(
     new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))),
   )
@@ -48,30 +50,51 @@ export async function finishEvidence(req, env, response) {
   if (!context || !response.ok) return response;
   const result = await response.clone().json();
   if (!result.coverageComplete) return response;
-  if (context.job.fixtures.some((f) => !context.refs[f.fixture.id])) return response;
   const proposalId = crypto.randomUUID();
+  try {
+    return await persistEvidence(env, context, result, proposalId);
+  } catch (error) {
+    const code = ['EVIDENCE_INCOMPLETE', 'EVIDENCE_TOO_LARGE'].includes(error?.code)
+      ? error.code
+      : 'EVIDENCE_STORAGE_FAILED';
+    const status = { schemaVersion: 2, proposalId, status: 'incomplete', code };
+    // Aucun message R2 libre : il peut contenir un secret ou une identité.
+    console.warn(JSON.stringify({ event: 'evidence_incomplete', code }));
+    try {
+      if (
+        !(await env.BUCKET.put(
+          'jobs/' + context.job.id + '/evidence/proposals/' + proposalId + '/status.json',
+          JSON.stringify(status),
+        ))
+      )
+        throw evidenceError('EVIDENCE_STORAGE_FAILED', 503, 'Stockage indisponible.');
+    } catch {
+      console.warn(
+        JSON.stringify({ event: 'evidence_status_write_failed', code: 'EVIDENCE_STORAGE_FAILED' }),
+      );
+    }
+    return json({ ...result, evidence: status });
+  }
+}
+
+async function persistEvidence(env, context, result, proposalId) {
+  if (context.job.fixtures.some((f) => !context.refs[f.fixture.id]))
+    throw evidenceError('EVIDENCE_INCOMPLETE', 409, 'Preuves incomplètes.');
   const prefix = 'jobs/' + context.job.id + '/evidence/';
-  const inputKeys = [
-    'verdict',
-    'selections',
-    'reviews',
-    'blockers',
-    'scope',
-    'analyzed',
-    'eligibleCount',
-    'scanLimit',
-    'coverageComplete',
-    'jobId',
-    'modelValidated',
-    'realMoneyEligible',
-    'policy',
-    'generatedAt',
-    'combinedOdds',
-    'combinedProbability',
-    'screening',
-  ];
   const llmInput = Object.fromEntries(
-    inputKeys.filter((k) => result[k] !== undefined).map((k) => [k, result[k]]),
+    Object.entries(result).filter(
+      ([key]) =>
+        ![
+          'summary',
+          'reasons',
+          'engine',
+          'model',
+          'llmError',
+          'saved',
+          'evidence',
+          'reports',
+        ].includes(key),
+    ),
   );
   llmInput.risks = [
     'Modèle non validé hors échantillon.',
@@ -81,7 +104,9 @@ export async function finishEvidence(req, env, response) {
   if (result.ticketProbability !== undefined) llmInput.ticketProbability = result.ticketProbability;
   const requested = result.selections.length > 0 && !!(env.OPENAI_API_KEY && env.LLM_MODEL);
   const metadata = redactEvidence(env, {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    status: 'complete',
+    pageSize: evidencePageSize,
     proposalId,
     jobId: context.job.id,
     generatedAt: result.generatedAt,
@@ -124,13 +149,18 @@ export async function finishEvidence(req, env, response) {
     },
     totalMatches: context.job.fixtures.length,
   });
+  const metadataText = boundedEvidence(metadata, EVIDENCE_LIMITS.metadataBytes);
+  let storedBytes = new TextEncoder().encode(metadataText).byteLength + 1024;
   let page = [],
     pageIndex = 0;
   const writePage = async () => {
-    await env.BUCKET.put(
-      prefix + 'proposals/' + proposalId + '/pages/' + pageIndex++ + '.json',
-      JSON.stringify(page),
-    );
+    const text = boundedEvidence(page, EVIDENCE_LIMITS.pageBytes);
+    storedBytes += new TextEncoder().encode(text).byteLength;
+    if (storedBytes > EVIDENCE_LIMITS.proposalBytes)
+      throw evidenceError('EVIDENCE_TOO_LARGE', 413, 'Dossier trop volumineux.');
+    const key = prefix + 'proposals/' + proposalId + '/pages/' + pageIndex++ + '.json';
+    if (!(await env.BUCKET.put(key, text)))
+      throw evidenceError('EVIDENCE_STORAGE_FAILED', 503, 'Stockage indisponible.');
     page = [];
   };
   for (const f of context.job.fixtures) {
@@ -141,35 +171,31 @@ export async function finishEvidence(req, env, response) {
     const object = await env.BUCKET.get(prefix + 'snapshots/' + currentRef.snapshotId + '.json');
     if (!object) throw evidenceError('EVIDENCE_INCOMPLETE', 409, 'Preuves incomplètes.');
     const snapshot = await object.json();
-    let original = snapshot;
-    if (originalRef.snapshotId !== currentRef.snapshotId) {
-      const originalObject = await env.BUCKET.get(
-        prefix + 'snapshots/' + originalRef.snapshotId + '.json',
-      );
-      if (!originalObject) throw evidenceError('EVIDENCE_INCOMPLETE', 409, 'Preuves incomplètes.');
-      original = await originalObject.json();
-    }
+    if (
+      originalRef.snapshotId !== currentRef.snapshotId &&
+      !(await env.BUCKET.get(prefix + 'snapshots/' + originalRef.snapshotId + '.json'))
+    )
+      throw evidenceError('EVIDENCE_INCOMPLETE', 409, 'Preuves incomplètes.');
     const decision = ticketDecision(
       snapshot,
       metadata.ticket.selections,
       Date.parse(result.generatedAt),
     );
-    page.push({
+    const entry = {
       ...decision,
       originalSnapshotId: originalRef.snapshotId,
       snapshotId: currentRef.snapshotId,
-      snapshot,
-      original,
-    });
+    };
+    boundedEvidence(entry, EVIDENCE_LIMITS.decisionBytes);
+    page.push(entry);
     if (page.length === evidencePageSize) await writePage();
   }
   if (page.length) await writePage();
-  await env.BUCKET.put(
-    prefix + 'proposals/' + proposalId + '/ticket.json',
-    JSON.stringify(metadata),
-  );
-  await env.BUCKET.put(prefix + 'latest.json', JSON.stringify({ proposalId }));
-  return json({ ...result, evidence: { schemaVersion: 1, proposalId } });
+  if (!(await env.BUCKET.put(prefix + 'proposals/' + proposalId + '/ticket.json', metadataText)))
+    throw evidenceError('EVIDENCE_STORAGE_FAILED', 503, 'Stockage indisponible.');
+  if (!(await env.BUCKET.put(prefix + 'latest.json', JSON.stringify({ proposalId }))))
+    throw evidenceError('EVIDENCE_STORAGE_FAILED', 503, 'Stockage indisponible.');
+  return json({ ...result, evidence: { schemaVersion: 2, proposalId, status: 'complete' } });
 }
 
 export async function exportEvidence(req, env) {
@@ -181,6 +207,7 @@ export async function exportEvidence(req, env) {
     proposal = query.get('proposalId');
   const offsetText = query.get('offset') ?? '0',
     limitText = query.get('limit') ?? '50';
+  const includeSnapshots = query.get('includeSnapshots') ?? 'none';
   if (
     !uuidPattern.test(id || '') ||
     (proposal !== null && !uuidPattern.test(proposal)) ||
@@ -188,7 +215,10 @@ export async function exportEvidence(req, env) {
     !/^\d{1,3}$/.test(limitText) ||
     Number(limitText) < 1 ||
     Number(limitText) > 100 ||
-    [...query.keys()].some((k) => !['jobId', 'proposalId', 'offset', 'limit'].includes(k)) ||
+    !['none', 'current', 'original'].includes(includeSnapshots) ||
+    [...query.keys()].some(
+      (k) => !['jobId', 'proposalId', 'offset', 'limit', 'includeSnapshots'].includes(k),
+    ) ||
     [...new Set(query.keys())].some((k) => query.getAll(k).length !== 1)
   )
     throw evidenceError('INVALID_EVIDENCE_QUERY', 400, 'Paramètres du dossier invalides.');
@@ -205,13 +235,13 @@ export async function exportEvidence(req, env) {
     : null;
   if (!ticket) throw evidenceError('EVIDENCE_NOT_FOUND', 404, 'Dossier introuvable.');
   const metadata = await ticket.json();
-  const { totalMatches, ...publicMetadata } = metadata;
+  const { totalMatches, pageSize = 100, ...publicMetadata } = metadata;
   const offset = Number(offsetText),
     limit = Number(limitText);
   const pageNumbers = [];
   for (
-    let n = Math.floor(offset / evidencePageSize);
-    n <= Math.floor((Math.min(offset + limit, totalMatches) - 1) / evidencePageSize);
+    let n = Math.floor(offset / pageSize);
+    n <= Math.floor((Math.min(offset + limit, totalMatches) - 1) / pageSize);
     n++
   )
     pageNumbers.push(n);
@@ -224,20 +254,51 @@ export async function exportEvidence(req, env) {
       return obj.json();
     }),
   );
-  const withinPage = offset % evidencePageSize;
-  const decisions = pages.flat().slice(withinPage, withinPage + limit);
-  return json(
-    redactEvidence(env, {
-      ...publicMetadata,
-      decisions,
-      pagination: {
-        offset,
-        limit,
-        total: totalMatches,
-        nextOffset: offset + limit < totalMatches ? offset + limit : null,
-      },
-    }),
-  );
+  const withinPage = offset % pageSize;
+  const candidates = pages.flat().slice(withinPage, withinPage + limit);
+  const decisions = [],
+    snapshots = [],
+    loaded = new Set();
+  let responseBytes = new TextEncoder().encode(JSON.stringify(publicMetadata)).byteLength + 1024;
+  for (const decision of candidates) {
+    let snapshot;
+    const snapshotId =
+      includeSnapshots === 'current' ? decision.snapshotId : decision.originalSnapshotId;
+    // Au plus une lecture d'instantané par décision demandée, IDs issus des pages autorisées.
+    if (includeSnapshots !== 'none' && !loaded.has(snapshotId)) {
+      const object = await env.BUCKET.get(prefix + 'snapshots/' + snapshotId + '.json');
+      if (!object) throw evidenceError('EVIDENCE_INCOMPLETE', 409, 'Preuves incomplètes.');
+      snapshot = { snapshotId, ...(await object.json()) };
+    }
+    const bytes =
+      new TextEncoder().encode(JSON.stringify(decision)).byteLength +
+      (snapshot ? new TextEncoder().encode(JSON.stringify(snapshot)).byteLength : 0) +
+      2;
+    if (responseBytes + bytes > EVIDENCE_LIMITS.responseBytes) {
+      if (!decisions.length)
+        throw evidenceError('EVIDENCE_TOO_LARGE', 413, 'Dossier trop volumineux.');
+      break;
+    }
+    responseBytes += bytes;
+    decisions.push(decision);
+    if (snapshot) {
+      snapshots.push(snapshot);
+      loaded.add(snapshotId);
+    }
+  }
+  const output = redactEvidence(env, {
+    ...publicMetadata,
+    decisions,
+    snapshots,
+    pagination: {
+      offset,
+      limit,
+      total: totalMatches,
+      nextOffset: offset + decisions.length < totalMatches ? offset + decisions.length : null,
+    },
+  });
+  boundedEvidence(output, EVIDENCE_LIMITS.responseBytes);
+  return json(output);
 }
 
 export async function putJob(env, job) {

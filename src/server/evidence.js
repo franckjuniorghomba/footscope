@@ -3,6 +3,26 @@ import { assessMatch } from './statistics.js';
 import { POLICY, MODEL_VERSION } from './policy.js';
 import { supportedMarkets } from './coupon.js';
 
+// Plafonds UTF-8, vérifiés avant toute écriture du dossier.
+export const EVIDENCE_LIMITS = Object.freeze({
+  decisionBytes: 128 * 1024,
+  pageBytes: 512 * 1024,
+  proposalBytes: 8 * 1024 * 1024,
+  snapshotBytes: 512 * 1024,
+  metadataBytes: 256 * 1024,
+  responseBytes: 1024 * 1024,
+  pageSize: 3,
+});
+export function boundedEvidence(value, maximum) {
+  const text = JSON.stringify(value);
+  if (new TextEncoder().encode(text).byteLength > maximum)
+    throw Object.assign(Error('Dossier trop volumineux.'), {
+      code: 'EVIDENCE_TOO_LARGE',
+      status: 413,
+    });
+  return text;
+}
+
 const analysisCache = new Map();
 const analysisPending = new Map();
 
@@ -12,6 +32,7 @@ export function sourceStamp(query, retrievedAt, status = 'available') {
 
 // Les erreurs fournisseur et les identités de joueurs ne font pas partie du contrat exporté.
 export function redactEvidence(env, value) {
+  const names = ['API_FOOTBALL_KEY', 'OPENAI_API_KEY', 'API_RELAY_TOKEN'];
   const forbidden = [
     env.API_FOOTBALL_KEY,
     env.OPENAI_API_KEY,
@@ -22,12 +43,30 @@ export function redactEvidence(env, value) {
   ].filter(Boolean);
   const clean = (x) => {
     if (typeof x === 'string') {
-      for (const secret of forbidden) x = x.split(secret).join('[masqué]');
+      for (const secret of forbidden) {
+        // Une clé courte ne doit pas renommer les champs ni corrompre chaque mot.
+        if (secret.length >= 16 || names.includes(secret)) x = x.split(secret).join('[masqué]');
+        else
+          x = x.replace(
+            new RegExp(
+              '(?<![\\p{L}\\p{N}_])' +
+                secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+                '(?![\\p{L}\\p{N}_])',
+              'gu',
+            ),
+            '[masqué]',
+          );
+      }
       return x;
     }
     if (Array.isArray(x)) return x.map(clean);
     if (x && typeof x === 'object')
-      return Object.fromEntries(Object.entries(x).map(([k, v]) => [clean(k), clean(v)]));
+      return Object.fromEntries(
+        Object.entries(x).map(([k, v]) => [
+          names.includes(k) || forbidden.includes(k) ? '[masqué]' : k,
+          clean(v),
+        ]),
+      );
     return x;
   };
   return clean(value);
@@ -94,7 +133,7 @@ export function evidenceSnapshot(
     retrievedAt: data?.retrievedAt || report.retrievedAt,
     home: (data?.home || []).map(publicFixture),
     away: (data?.away || []).map(publicFixture),
-    odds: publicOdds(data?.odds || rawOdds),
+    odds: publicOdds(rawOdds.length ? rawOdds : data?.odds || []),
     injuries: [],
     lineups: (data?.lineups || []).map((x) => ({ startXI: (x.startXI || []).map(() => ({})) })),
     errors: Object.fromEntries(Object.keys(data?.errors || {}).map((k) => [k, 'unavailable'])),
@@ -114,9 +153,13 @@ export function evidenceSnapshot(
     'modelVersion',
     'modelValidated',
   ]);
+  // Les événements sans probabilité sont comptés par marché plutôt que copiés par cote.
+  const assessed = fullReport.events || [];
+  fullReport.events = assessed.filter((e) => e.probability !== null);
+  const quoteSummary = summarizeQuotes(inputs.odds, assessed);
   const sources = data?.sources || { fixture: fixtureSource, odds: oddsSource };
   return redactEvidence(env, {
-    schemaVersion: 1,
+    schemaVersion: 2,
     evaluatedAt: evaluatedAt || new Date().toISOString(),
     modelVersion: MODEL_VERSION,
     policy: { ...POLICY },
@@ -127,7 +170,7 @@ export function evidenceSnapshot(
     },
     sources,
     inputs,
-    quotes: publicOdds(rawOdds.length ? rawOdds : data?.odds || []),
+    quoteSummary,
     report: fullReport,
     screeningReasons: code
       ? [{ code, message: report.common[0] }]
@@ -135,8 +178,41 @@ export function evidenceSnapshot(
   });
 }
 
-const sameEvent = (a, b) =>
-  ['matchId', 'bookmaker', 'market', 'selection'].every((k) => a[k] === b[k]);
+const bookmakerKey = (name) =>
+  typeof name === 'string' && name.trim().toLowerCase() === 'bet365' ? 'Bet365' : name;
+const eventKey = (e) =>
+  JSON.stringify([e.matchId, bookmakerKey(e.bookmaker), e.market, e.selection]);
+const sameEvent = (a, b) => eventKey(a) === eventKey(b);
+function summarizeQuotes(rows, assessed) {
+  const evaluated = new Map(assessed.map((e) => [eventKey(e), e]));
+  const summaries = new Map();
+  for (const row of rows)
+    for (const book of row.bookmakers)
+      for (const market of book.bets)
+        for (const value of market.values) {
+          const event = evaluated.get(
+            eventKey({
+              matchId: row.fixture.id,
+              bookmaker: book.name,
+              market: market.name,
+              selection: value.value,
+            }),
+          );
+          if (event && event.probability !== null) continue;
+          const code =
+            !Number.isFinite(Number(value.odd)) || Number(value.odd) <= 1
+              ? 'INVALID_ODDS'
+              : !supportedMarkets.has(market.name)
+                ? 'MARKET_NOT_SUPPORTED'
+                : event
+                  ? 'MARKET_UNMODELED'
+                  : 'QUOTE_NOT_EVALUATED';
+          const key = JSON.stringify([market.name, code]);
+          if (!summaries.has(key)) summaries.set(key, { market: market.name, code, count: 0 });
+          summaries.get(key).count++;
+        }
+  return [...summaries.values()];
+}
 export function ticketDecision(snapshot, selections, at) {
   const report = snapshot.report;
   const selected = selections.find((x) => x.matchId === report.matchId);
@@ -147,58 +223,44 @@ export function ticketDecision(snapshot, selections, at) {
       return 'ODDS_STALE_OR_INVALID';
     if (at - Date.parse(report.retrievedAt) > 15 * 60000) return 'EVIDENCE_STALE';
     if (selected) return 'ONE_SELECTION_PER_MATCH';
-    if (selections.length && selections[0].bookmaker !== event.bookmaker) return 'SINGLE_BOOKMAKER';
+    if (
+      selections.length &&
+      bookmakerKey(selections[0].bookmaker) !== bookmakerKey(event.bookmaker)
+    )
+      return 'SINGLE_BOOKMAKER';
+    const threshold = snapshot.policy.minTicketProbability;
+    const combined = selections.reduce((p, e) => p * e.prudentProbability, 1);
+    if (
+      Number.isFinite(threshold) &&
+      Number.isFinite(event.prudentProbability) &&
+      combined * event.prudentProbability < threshold
+    )
+      return 'TICKET_PROBABILITY_BELOW_THRESHOLD';
     if (selections.length >= snapshot.policy.maxSelections) return 'MAX_SELECTIONS';
     return 'CANDIDATE_RANKING';
   };
-  const events = (report.events || []).map((e) => {
-    const included = selections.some((s) => sameEvent(s, e));
-    return {
-      ...e,
-      state: included ? 'included' : 'excluded',
-      reasons: included
-        ? [{ code: 'POLICY_PASSED' }, { code: 'TICKET_SELECTED' }]
-        : e.reasons.length
-          ? e.reasons.map(structuredReason)
-          : [{ code: compositionReason(e) }],
-      provenance: {
-        input: 'inputs',
-        sources: ['fixture', 'home', 'away', 'odds'],
-        evaluatedAt: snapshot.evaluatedAt,
-      },
-    };
-  });
-  // Certaines cotes ne sont jamais soumises au modèle (marché filtré ou cote invalide).
-  for (const row of snapshot.quotes)
-    for (const book of row.bookmakers)
-      for (const market of book.bets)
-        for (const value of market.values) {
-          const event = {
-            matchId: report.matchId,
-            bookmaker: book.name,
-            market: market.name,
-            selection: value.value,
-          };
-          if (events.some((e) => sameEvent(e, event))) continue;
-          events.push({
-            ...event,
-            odd: value.odd,
-            updated: row.update,
-            state: 'excluded',
-            reasons: [
-              {
-                code:
-                  !Number.isFinite(Number(value.odd)) || Number(value.odd) <= 1
-                    ? 'INVALID_ODDS'
-                    : !supportedMarkets.has(market.name)
-                      ? 'MARKET_NOT_SUPPORTED'
-                      : 'QUOTE_NOT_EVALUATED',
-              },
-              ...snapshot.screeningReasons,
-            ],
-            provenance: { input: 'quotes', sources: ['odds'], evaluatedAt: snapshot.evaluatedAt },
-          });
-        }
+  const events = (report.events || [])
+    .filter((e) => e.probability !== null)
+    .map((e) => {
+      const included = selections.some((s) => sameEvent(s, e));
+      return {
+        ...e,
+        state: included ? 'included' : 'excluded',
+        reasons: included
+          ? [{ code: 'POLICY_PASSED' }, { code: 'TICKET_SELECTED' }]
+          : e.reasons.length
+            ? e.reasons.map(structuredReason)
+            : [{ code: compositionReason(e) }],
+        provenance: {
+          input: 'inputs',
+          sources: ['fixture', 'home', 'away', 'odds'],
+          evaluatedAt: snapshot.evaluatedAt,
+        },
+      };
+    });
+  const quoteSummary =
+    snapshot.quoteSummary ||
+    summarizeQuotes(snapshot.quotes || snapshot.inputs.odds, report.events || []);
   return {
     matchId: report.matchId,
     state: selected
@@ -208,8 +270,17 @@ export function ticketDecision(snapshot, selections, at) {
         : 'excluded',
     reasons: selected
       ? [{ code: 'TICKET_SELECTED' }]
-      : [...snapshot.screeningReasons, ...events.flatMap((e) => e.reasons)],
+      : [
+          ...new Map(
+            [
+              ...snapshot.screeningReasons,
+              ...events.flatMap((e) => e.reasons),
+              ...quoteSummary.map((q) => ({ code: q.code })),
+            ].map((r) => [r.code, r]),
+          ).values(),
+        ],
     events,
+    quoteSummary,
   };
 }
 

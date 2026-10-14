@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {
+  EVIDENCE_LIMITS,
+  boundedEvidence,
+  redactEvidence,
+  ticketDecision,
+} from '../src/server/evidence.js';
 
 const source = fs
   .readFileSync('dist/server/index.js', 'utf8')
@@ -18,6 +24,7 @@ const env = {
   API_FOOTBALL_KEY: 'football-secret-sentinel',
   OPENAI_API_KEY: 'openai-secret-sentinel',
   LLM_MODEL: 'fixture-model',
+  API_RELAY_TOKEN: 'relay-secret-sentinel',
   BUCKET: {
     get: async (key) => {
       reads++;
@@ -48,7 +55,12 @@ const game = (id) => ({
 const refusals = Array.from({ length: 21 }, (_, i) => game(i + 1));
 // Une donnée inattendue ne doit pas devenir une identité ou un secret exporté.
 refusals[0].teams.home.name +=
-  ' API_FOOTBALL_KEY ' + env.API_FOOTBALL_KEY + ' OPENAI_API_KEY ' + env.OPENAI_API_KEY;
+  ' API_FOOTBALL_KEY ' +
+  env.API_FOOTBALL_KEY +
+  ' OPENAI_API_KEY ' +
+  env.OPENAI_API_KEY +
+  ' API_RELAY_TOKEN ' +
+  env.API_RELAY_TOKEN;
 refusals[0].fixture.identity = 'private-person-sentinel';
 let fixtures = refusals;
 const odds = (id) => ({
@@ -182,29 +194,49 @@ assert.deepEqual(
   prepared.ids,
 );
 assert.equal(dossier.decisions[1].state, 'source_unavailable');
-assert(dossier.decisions[1].events[0].reasons.some((r) => r.code === 'SOURCE_UNAVAILABLE'));
+assert(dossier.decisions[1].reasons.some((r) => r.code === 'SOURCE_UNAVAILABLE'));
+assert(dossier.decisions[1].quoteSummary.length > 0);
 assert(dossier.decisions[0].events[0].reasons.some((r) => r.code === 'EDGE_BELOW_POLICY'));
 assert.equal(dossier.decisions[2].reasons[0].code, 'NO_ODDS_AFTER_COMPLETE_COVERAGE');
 assert.equal(dossier.decisions[3].reasons[0].code, 'NO_SUPPORTED_FRESH_QUOTES');
-assert(
-  dossier.decisions[4].events.some((e) => e.reasons.some((r) => r.code === 'MARKET_NOT_SUPPORTED')),
-);
+assert(dossier.decisions[4].quoteSummary.some((q) => q.code === 'MARKET_NOT_SUPPORTED'));
 assert.equal(dossier.llm.requested, false);
 assert.equal(dossier.llm.input, null);
 const serialized = JSON.stringify(dossier);
 for (const secret of [
   'API_FOOTBALL_KEY',
   'OPENAI_API_KEY',
+  'API_RELAY_TOKEN',
+  env.API_RELAY_TOKEN,
   env.API_FOOTBALL_KEY,
   env.OPENAI_API_KEY,
   'owner-sentinel',
   'private-person-sentinel',
 ])
   assert(!serialized.includes(secret), 'Export leaked ' + secret.replace(/secret.*/, '[sentinel]'));
-const snapshot = dossier.decisions[0].snapshot;
+assert(dossier.decisions.every((d) => !('snapshot' in d) && !('original' in d)));
+assert.deepEqual(dossier.snapshots, []);
+const withSnapshot = await successful(
+  await get('jobId=' + prepared.jobId + '&limit=1&includeSnapshots=current'),
+);
+const snapshot = withSnapshot.snapshots[0];
+assert.equal(snapshot.snapshotId, dossier.decisions[0].snapshotId);
+for (const secret of [
+  'API_RELAY_TOKEN',
+  env.API_RELAY_TOKEN,
+  'API_FOOTBALL_KEY',
+  env.API_FOOTBALL_KEY,
+  'OPENAI_API_KEY',
+  env.OPENAI_API_KEY,
+])
+  assert(!JSON.stringify(withSnapshot).includes(secret));
 const replay = mod.assessMatch(snapshot.inputs, Date.parse(snapshot.evaluatedAt));
 assert.deepEqual(replay.model, snapshot.report.model);
-assert.deepEqual(replay.events, snapshot.report.events, 'Every model output reproduced offline');
+assert.deepEqual(
+  replay.events.filter((e) => e.probability !== null),
+  snapshot.report.events,
+  'Every model output reproduced offline',
+);
 assert(snapshot.sources.home.retrievedAt);
 assert(snapshot.sources.away.retrievedAt);
 assert(snapshot.sources.odds.records[0].retrievedAt);
@@ -216,6 +248,9 @@ assert.equal(
 assert.equal(snapshot.modelParameters.scoreTerms, 30);
 for (const query of [
   'jobId=../other',
+  'jobId=' + prepared.jobId + '&includeSnapshots=both',
+  'jobId=' + prepared.jobId + '&includeSnapshots=current&includeSnapshots=original',
+  'jobId=' + prepared.jobId + '&snapshotId=' + dossier.decisions[0].snapshotId,
   'jobId=' + prepared.jobId + '&limit=101',
   'jobId=' + prepared.jobId + '&limit=0',
   'jobId=' + prepared.jobId + '&offset=-1',
@@ -232,6 +267,16 @@ assert.equal((await get('jobId=' + prepared.jobId, null)).status, 401);
 assert.equal((await get('jobId=' + prepared.jobId, 'private-site')).status, 401);
 assert.equal(reads, beforeReads, 'No storage read without identity');
 assert.equal((await get('jobId=' + prepared.jobId, 'other-owner')).status, 404);
+beforeReads = reads;
+assert.equal(
+  (await get('jobId=' + prepared.jobId + '&includeSnapshots=current', 'other-owner')).status,
+  404,
+);
+assert.equal(reads - beforeReads, 1, 'No snapshot or page read for another owner');
+assert.equal(
+  (await get('jobId=' + prepared.jobId + '&includeSnapshots=original', null)).status,
+  401,
+);
 assert.equal((await get('jobId=' + prepared.jobId, 'owner-sentinel', {})).status, 503);
 assert.equal((await post('evidence', { jobId: prepared.jobId })).status, 405);
 const pages = [];
@@ -314,19 +359,21 @@ assert(
     .flatMap((d) => d.events)
     .some((e) => e.reasons.some((r) => r.code === 'MAX_SELECTIONS')),
 );
-assert(
-  ticketDossier.decisions
-    .flatMap((d) => d.events)
-    .some((e) => e.reasons.some((r) => r.code === 'INVALID_ODDS')),
-);
+assert(ticketDossier.decisions.some((d) => d.quoteSummary.some((q) => q.code === 'INVALID_ODDS')));
 const checked = ticketDossier.decisions.find((d) => d.state === 'included');
 assert.notEqual(
   checked.snapshotId,
   checked.originalSnapshotId,
   'Final refresh is a separate snapshot',
 );
+const originalDossier = await successful(
+  await get('jobId=' + jobId + '&includeSnapshots=original'),
+);
+const originalSnapshot = originalDossier.snapshots.find(
+  (s) => s.snapshotId === checked.originalSnapshotId,
+);
 assert(
-  checked.original.quotes.some((r) =>
+  originalSnapshot.inputs.odds.some((r) =>
     r.bookmakers.some((b) => b.bets.some((m) => m.name === 'Corners Over Under')),
   ),
 );
@@ -392,11 +439,7 @@ assert.deepEqual(
 );
 assert.equal(crossing.pagination.total, 103);
 assert.equal(crossing.pagination.nextOffset, null);
-assert.equal(
-  reads - beforeReads,
-  5,
-  'Two indexed pages plus three metadata reads, independent of match count',
-);
+assert.equal(reads - beforeReads, 7, 'Four small pages plus three metadata reads');
 assert.equal(calls, largeCalls);
 assert.equal(
   (await successful(await get('jobId=' + largeId + '&limit=100'))).decisions.length,
@@ -404,4 +447,327 @@ assert.equal(
 );
 console.log(
   'Passed: 21/21 retained decisions (zero eligible, refusals and source failure), offline numeric replay, dated sources, secrets/identity absent, owner refusals, bounded read-only pagination, zero export calls, immutable original/recheck/tickets, composition rules and exact semantic LLM input.',
+);
+
+// Régression volume : 21 matchs, 6 bookmakers × 25 marchés × 6 valeurs.
+const realisticMarkets = ['Match Winner', 'Goals Over/Under', 'Both Teams Score', 'Double Chance'];
+const richOdds = (id) => ({
+  fixture: { id },
+  update: new Date(now).toISOString(),
+  bookmakers: Array.from({ length: 6 }, (_, b) => ({
+    name: 'Realistic bookmaker ' + b,
+    bets: Array.from({ length: 25 }, (_, m) => ({
+      name: realisticMarkets[m] || 'Market number ' + m,
+      values: Array.from({ length: 6 }, (_, v) => ({
+        value: m === 1 ? (v % 2 ? 'Under ' : 'Over ') + (v + 0.5) : 'Value ' + v,
+        odd: (1.5 + v / 10).toFixed(2),
+      })),
+    })),
+  })),
+});
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, options) => {
+  const u = new URL(url);
+  if (u.pathname.endsWith('/odds') && u.searchParams.has('fixture'))
+    return Response.json({
+      response: [richOdds(Number(u.searchParams.get('fixture')))],
+      errors: {},
+      paging: { total: 1 },
+    });
+  return originalFetch(url, options);
+};
+const richId = crypto.randomUUID();
+fixtures = Array.from({ length: 21 }, (_, i) => game(400 + i));
+db.set(
+  'jobs/' + richId + '/manifest.json',
+  JSON.stringify({
+    ...manifest,
+    id: richId,
+    fixtures,
+    createdAt: new Date().toISOString(),
+    quoteDays: fixtures.map((f) => String(f.fixture.id)),
+    quoteTotals: {},
+    quoteCompleted: [],
+    finalChecked: {},
+  }),
+);
+for (const f of fixtures)
+  await successful(await post('quotes', { jobId: richId, day: String(f.fixture.id) }));
+for (const f of fixtures)
+  await successful(await post('scan', { jobId: richId, matchId: f.fixture.id }));
+let richProposal;
+do {
+  richProposal = await successful(await post('propose', { jobId: richId }));
+  for (const matchId of richProposal.needsRecheck || [])
+    await successful(await post('scan', { jobId: richId, matchId, recheck: true }));
+} while (richProposal.needsRecheck?.length);
+assert.equal(richProposal.evidence.status, 'complete');
+const richDossier = await successful(await get('jobId=' + richId));
+assert.equal(richDossier.decisions.length, 21);
+for (const d of richDossier.decisions) {
+  assert(Buffer.byteLength(JSON.stringify(d)) <= 128 * 1024, 'Decision ≤ 128 KiB');
+  assert(!('snapshot' in d) && !('original' in d));
+  assert.equal(d.events.length, 36, 'Only numeric model events remain individual');
+  assert.equal(
+    d.quoteSummary.reduce((n, q) => n + q.count, 0),
+    864,
+    'Every other quote counted',
+  );
+}
+const richPrefix =
+  'jobs/' + richId + '/evidence/proposals/' + richProposal.evidence.proposalId + '/';
+const richObjects = [...db.entries()].filter(([key]) => key.startsWith(richPrefix));
+assert(
+  richObjects
+    .filter(([key]) => key.includes('/pages/'))
+    .every(([, value]) => Buffer.byteLength(value) <= 512 * 1024),
+);
+assert(richObjects.reduce((n, [, value]) => n + Buffer.byteLength(value), 0) <= 8 * 1024 * 1024);
+assert(
+  [...db.entries()]
+    .filter(([key]) => key.startsWith('jobs/' + richId + '/evidence/snapshots/'))
+    .every(([, value]) => Buffer.byteLength(value) <= 512 * 1024),
+);
+const getCount = reads,
+  putCount = writes,
+  callCount = calls;
+const richWithSnapshot = await successful(
+  await get('jobId=' + richId + '&limit=1&includeSnapshots=current'),
+);
+assert.equal(reads - getCount, 5, 'Three metadata, one page, one snapshot for limit=1');
+assert.equal(writes, putCount);
+assert.equal(calls, callCount);
+assert.equal(richWithSnapshot.snapshots.length, 1);
+assert(!('quotes' in richWithSnapshot.snapshots[0]), 'No duplicated inputs.odds / quotes');
+assert.equal(
+  richWithSnapshot.snapshots[0].inputs.odds.reduce(
+    (n, row) =>
+      n +
+      row.bookmakers.reduce((sum, b) => sum + b.bets.reduce((s, m) => s + m.values.length, 0), 0),
+    0,
+  ),
+  900,
+);
+const richReplay = mod.assessMatch(
+  richWithSnapshot.snapshots[0].inputs,
+  Date.parse(richWithSnapshot.snapshots[0].evaluatedAt),
+);
+assert.deepEqual(
+  richReplay.events.filter((e) => e.probability !== null),
+  richWithSnapshot.snapshots[0].report.events,
+);
+const snapshotIds = [];
+for (let offset = 0; offset !== null;) {
+  const startReads = reads;
+  const response = await get(
+    'jobId=' + richId + '&offset=' + offset + '&limit=100&includeSnapshots=current',
+  );
+  const text = await response.text();
+  assert.equal(response.status, 200);
+  assert(Buffer.byteLength(text) <= 1024 * 1024, 'HTTP page ≤ 1 MiB, even with snapshots');
+  const page = JSON.parse(text);
+  assert(page.decisions.length > 0);
+  assert(reads - startReads <= 3 + Math.ceil(100 / 3) + 1 + 100);
+  snapshotIds.push(...page.decisions.map((d) => d.matchId));
+  offset = page.pagination.nextOffset;
+}
+assert.deepEqual(
+  snapshotIds,
+  fixtures.map((f) => f.fixture.id),
+  'Byte pagination never drops a match',
+);
+
+// Échecs après observation/LLM : ticket HTTP 200, statut incomplet, journal expurgé.
+const logs = [],
+  warn = console.warn;
+console.warn = (message) => logs.push(message);
+const observationCount = () =>
+  [...db.keys()].filter((key) => key.startsWith('observations/')).length;
+const originalPut = env.BUCKET.put;
+for (const suffix of ['/pages/0.json', '/ticket.json', '/latest.json']) {
+  const before = observationCount();
+  env.BUCKET.put = async (key, value, options) => {
+    if (key.includes('/evidence/') && key.endsWith(suffix))
+      throw Error(env.API_RELAY_TOKEN + ' private-person-sentinel');
+    return originalPut(key, value, options);
+  };
+  const failed = await successful(await post('propose', { jobId: richId }));
+  assert.equal(failed.saved, true);
+  assert.equal(failed.selections.length, richProposal.selections.length);
+  assert.equal(failed.evidence.status, 'incomplete');
+  assert.equal(failed.evidence.code, 'EVIDENCE_STORAGE_FAILED');
+  assert.equal(observationCount() - before, 1, 'No second observation from dossier finalization');
+  assert.equal(
+    JSON.parse(
+      db.get(
+        'jobs/' + richId + '/evidence/proposals/' + failed.evidence.proposalId + '/status.json',
+      ),
+    ).status,
+    'incomplete',
+  );
+  assert.equal(
+    (await successful(await get('jobId=' + richId))).proposalId,
+    richProposal.evidence.proposalId,
+    'Failed proposal does not replace latest complete dossier',
+  );
+}
+env.BUCKET.put = async (key, value, options) => {
+  if (key.includes('/evidence/proposals/') && key.endsWith('/pages/0.json')) return null;
+  return originalPut(key, value, options);
+};
+const unacknowledgedWrite = await successful(await post('propose', { jobId: richId }));
+assert.equal(unacknowledgedWrite.evidence.status, 'incomplete');
+assert.equal(unacknowledgedWrite.evidence.code, 'EVIDENCE_STORAGE_FAILED');
+env.BUCKET.put = originalPut;
+const lostKey =
+  'jobs/' + richId + '/evidence/snapshots/' + richDossier.decisions[0].snapshotId + '.json';
+const lostSnapshot = db.get(lostKey);
+db.delete(lostKey);
+const missingSnapshot = await successful(await post('propose', { jobId: richId }));
+assert.equal(missingSnapshot.evidence.status, 'incomplete');
+assert.equal(missingSnapshot.evidence.code, 'EVIDENCE_INCOMPLETE');
+assert.equal((await get('jobId=' + richId + '&includeSnapshots=current&limit=1')).status, 409);
+db.set(lostKey, lostSnapshot);
+// Plafond de décision exercé par la route, avec un texte UTF-8 multioctet.
+const oversized = JSON.parse(lostSnapshot);
+oversized.report.events[0].match = 'é'.repeat(80000);
+db.set(lostKey, JSON.stringify(oversized));
+const tooLarge = await successful(await post('propose', { jobId: richId }));
+assert.equal(tooLarge.evidence.status, 'incomplete');
+assert.equal(tooLarge.evidence.code, 'EVIDENCE_TOO_LARGE');
+db.set(lostKey, lostSnapshot);
+// Budget global : chaque décision respecte son plafond, leur somme dépasse 8 MiB.
+const budgetId = crypto.randomUUID();
+const budgetFixtures = Array.from({ length: 110 }, (_, i) => game(1000 + i));
+db.set(
+  'jobs/' + budgetId + '/manifest.json',
+  JSON.stringify({
+    ...manifest,
+    id: budgetId,
+    fixtures: budgetFixtures,
+    createdAt: new Date().toISOString(),
+    quoteDays: [],
+    quoteTotals: {},
+    quoteCompleted: [],
+  }),
+);
+for (const f of budgetFixtures) {
+  const id = f.fixture.id,
+    snapshotId = id.toString(16).padStart(64, '0');
+  const snapshot = JSON.parse(lostSnapshot);
+  snapshot.report.matchId = id;
+  snapshot.report.events = [
+    { ...snapshot.report.events[0], matchId: id, status: 'reject', reasons: ['x'.repeat(80000)] },
+  ];
+  db.set(
+    'jobs/' + budgetId + '/evidence/snapshots/' + snapshotId + '.json',
+    JSON.stringify(snapshot),
+  );
+  db.set('jobs/' + budgetId + '/evidence/original/' + id + '.json', JSON.stringify({ snapshotId }));
+  db.set(
+    'jobs/' + budgetId + '/reports/' + id + '.json',
+    JSON.stringify({ ...snapshot.report, events: [], evidenceSnapshotId: snapshotId }),
+  );
+}
+const overBudget = await successful(await post('propose', { jobId: budgetId }));
+assert.equal(overBudget.evidence.code, 'EVIDENCE_TOO_LARGE');
+assert.equal(overBudget.evidence.status, 'incomplete');
+const budgetObjects = [...db.entries()].filter(([key]) =>
+  key.startsWith('jobs/' + budgetId + '/evidence/proposals/'),
+);
+assert(
+  budgetObjects.reduce((n, [, value]) => n + Buffer.byteLength(value), 0) <= 8 * 1024 * 1024,
+  'Even partial writes respect total proposal budget',
+);
+assert.equal((await get('jobId=' + budgetId)).status, 404, 'No publication of a partial dossier');
+// Une panne qui touche également le marqueur R2 reste signalée dans la réponse et les journaux.
+env.BUCKET.put = async (key, value, options) => {
+  if (key.includes('/evidence/proposals/')) throw Error(env.API_FOOTBALL_KEY);
+  return originalPut(key, value, options);
+};
+const totalFailure = await successful(await post('propose', { jobId: richId }));
+assert.equal(totalFailure.evidence.status, 'incomplete');
+assert(logs.some((line) => JSON.parse(line).event === 'evidence_status_write_failed'));
+env.BUCKET.put = originalPut;
+console.warn = warn;
+assert(logs.some((line) => JSON.parse(line).event === 'evidence_incomplete'));
+assert(!JSON.stringify(logs).includes(env.API_RELAY_TOKEN));
+assert(!JSON.stringify(logs).includes('private-person-sentinel'));
+
+// Bornes exactes UTF-8 et secrets courts : champs stables, valeur autonome masquée.
+assert.equal(boundedEvidence('é', 4), '"é"');
+assert.throws(() => boundedEvidence('é', 3), { code: 'EVIDENCE_TOO_LARGE' });
+assert.deepEqual(
+  redactEvidence(
+    { API_FOOTBALL_KEY: 'k', API_RELAY_TOKEN: 'x+' },
+    { bookmakers: 'Book k x+', kickoff: 'kickoff' },
+  ),
+  { bookmakers: 'Book [masqué] [masqué]', kickoff: 'kickoff' },
+);
+const shortId = crypto.randomUUID(),
+  originalKey = env.API_FOOTBALL_KEY;
+db.set(
+  'jobs/' + shortId + '/manifest.json',
+  JSON.stringify({
+    ...manifest,
+    id: shortId,
+    fixtures: [game(8000)],
+    createdAt: new Date().toISOString(),
+    quoteDays: ['8000'],
+    quoteTotals: {},
+    quoteCompleted: [],
+  }),
+);
+env.API_FOOTBALL_KEY = 'k';
+await successful(await post('quotes', { jobId: shortId, day: '8000' }));
+assert(
+  JSON.parse(db.get('jobs/' + shortId + '/evidence/quotes/8000.json')).rows[0].bookmakers.length >
+    0,
+  'Short key no longer renames bookmakers or breaks quotes route',
+);
+env.API_FOOTBALL_KEY = originalKey;
+assert.equal(
+  (
+    await get(
+      'jobId=' +
+        prepared.jobId +
+        '&proposalId=' +
+        richProposal.evidence.proposalId +
+        '&includeSnapshots=current',
+    )
+  ).status,
+  404,
+  'A proposal from another job cannot select its snapshots',
+);
+// Code futur de #7, aucune dépendance ni modification des seuils actuels.
+const thresholdSnapshot = JSON.parse(lostSnapshot);
+thresholdSnapshot.policy.minTicketProbability = 0.5;
+thresholdSnapshot.report.events = [
+  { ...thresholdSnapshot.report.events[0], prudentProbability: 0.6, probability: 0.9, reasons: [] },
+];
+const thresholdDecision = ticketDecision(
+  thresholdSnapshot,
+  [
+    {
+      matchId: 999,
+      bookmaker: thresholdSnapshot.report.events[0].bookmaker,
+      prudentProbability: 0.7,
+    },
+  ],
+  now,
+);
+assert.equal(thresholdDecision.events[0].reasons[0].code, 'TICKET_PROBABILITY_BELOW_THRESHOLD');
+const normalizedSnapshot = JSON.parse(lostSnapshot);
+normalizedSnapshot.report.events = [
+  { ...normalizedSnapshot.report.events[0], bookmaker: ' bet365 ', reasons: [] },
+];
+const normalizedDecision = ticketDecision(
+  normalizedSnapshot,
+  [{ matchId: 999, bookmaker: 'Bet365' }],
+  now,
+);
+assert.equal(normalizedDecision.events[0].reasons[0].code, 'CANDIDATE_RANKING');
+assert.equal(EVIDENCE_LIMITS.proposalBytes, 8 * 1024 * 1024);
+console.log(
+  'Passed: realistic 900 quotes/match, UTF-8 byte ceilings, on-demand snapshots, complete byte pagination, lost R2 writes/missing snapshot preserve ticket, safe logs and relay/short-key redaction.',
 );
