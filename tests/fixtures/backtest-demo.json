@@ -1,0 +1,1218 @@
+{
+  "schemaVersion": 1,
+  "kind": "demonstration",
+  "source": "synthetic",
+  "description": "40 rencontres artificielles de quatre équipes, destinées aux tests logiciels uniquement.",
+  "plan": {
+    "schemaVersion": 1,
+    "seasons": [2024, 2025],
+    "leagues": [39],
+    "developmentStart": "2025-06-01",
+    "testStart": "2025-07-01",
+    "testEnd": "2025-08-01",
+    "bootstrapReplicates": 200,
+    "seed": 167
+  },
+  "fixtures": [
+    {
+      "fixture": {
+        "id": 1000,
+        "date": "2025-06-07T17:00:00Z",
+        "timestamp": 1749315600,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        },
+        "away": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        }
+      },
+      "goals": {
+        "home": 3,
+        "away": 2
+      }
+    },
+    {
+      "fixture": {
+        "id": 1001,
+        "date": "2025-06-07T19:00:00Z",
+        "timestamp": 1749322800,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        },
+        "away": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        }
+      },
+      "goals": {
+        "home": 0,
+        "away": 0
+      }
+    },
+    {
+      "fixture": {
+        "id": 1002,
+        "date": "2025-06-09T17:00:00Z",
+        "timestamp": 1749488400,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        },
+        "away": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        }
+      },
+      "goals": {
+        "home": 0,
+        "away": 3
+      }
+    },
+    {
+      "fixture": {
+        "id": 1003,
+        "date": "2025-06-09T19:00:00Z",
+        "timestamp": 1749495600,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        },
+        "away": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        }
+      },
+      "goals": {
+        "home": 0,
+        "away": 1
+      }
+    },
+    {
+      "fixture": {
+        "id": 1004,
+        "date": "2025-06-11T17:00:00Z",
+        "timestamp": 1749661200,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        },
+        "away": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        }
+      },
+      "goals": {
+        "home": 3,
+        "away": 0
+      }
+    },
+    {
+      "fixture": {
+        "id": 1005,
+        "date": "2025-06-11T19:00:00Z",
+        "timestamp": 1749668400,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        },
+        "away": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        }
+      },
+      "goals": {
+        "home": 2,
+        "away": 1
+      }
+    },
+    {
+      "fixture": {
+        "id": 1006,
+        "date": "2025-06-13T17:00:00Z",
+        "timestamp": 1749834000,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        },
+        "away": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        }
+      },
+      "goals": {
+        "home": 2,
+        "away": 2
+      }
+    },
+    {
+      "fixture": {
+        "id": 1007,
+        "date": "2025-06-13T19:00:00Z",
+        "timestamp": 1749841200,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        },
+        "away": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        }
+      },
+      "goals": {
+        "home": 0,
+        "away": 1
+      }
+    },
+    {
+      "fixture": {
+        "id": 1008,
+        "date": "2025-06-15T17:00:00Z",
+        "timestamp": 1750006800,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        },
+        "away": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        }
+      },
+      "goals": {
+        "home": 3,
+        "away": 1
+      }
+    },
+    {
+      "fixture": {
+        "id": 1009,
+        "date": "2025-06-15T19:00:00Z",
+        "timestamp": 1750014000,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        },
+        "away": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        }
+      },
+      "goals": {
+        "home": 2,
+        "away": 0
+      }
+    },
+    {
+      "fixture": {
+        "id": 1010,
+        "date": "2025-06-17T17:00:00Z",
+        "timestamp": 1750179600,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        },
+        "away": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        }
+      },
+      "goals": {
+        "home": 0,
+        "away": 3
+      }
+    },
+    {
+      "fixture": {
+        "id": 1011,
+        "date": "2025-06-17T19:00:00Z",
+        "timestamp": 1750186800,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        },
+        "away": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        }
+      },
+      "goals": {
+        "home": 1,
+        "away": 1
+      }
+    },
+    {
+      "fixture": {
+        "id": 1012,
+        "date": "2025-06-19T17:00:00Z",
+        "timestamp": 1750352400,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        },
+        "away": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        }
+      },
+      "goals": {
+        "home": 3,
+        "away": 1
+      }
+    },
+    {
+      "fixture": {
+        "id": 1013,
+        "date": "2025-06-19T19:00:00Z",
+        "timestamp": 1750359600,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        },
+        "away": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        }
+      },
+      "goals": {
+        "home": 1,
+        "away": 0
+      }
+    },
+    {
+      "fixture": {
+        "id": 1014,
+        "date": "2025-06-21T17:00:00Z",
+        "timestamp": 1750525200,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        },
+        "away": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        }
+      },
+      "goals": {
+        "home": 1,
+        "away": 2
+      }
+    },
+    {
+      "fixture": {
+        "id": 1015,
+        "date": "2025-06-21T19:00:00Z",
+        "timestamp": 1750532400,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        },
+        "away": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        }
+      },
+      "goals": {
+        "home": 0,
+        "away": 2
+      }
+    },
+    {
+      "fixture": {
+        "id": 1016,
+        "date": "2025-06-23T17:00:00Z",
+        "timestamp": 1750698000,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        },
+        "away": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        }
+      },
+      "goals": {
+        "home": 3,
+        "away": 0
+      }
+    },
+    {
+      "fixture": {
+        "id": 1017,
+        "date": "2025-06-23T19:00:00Z",
+        "timestamp": 1750705200,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        },
+        "away": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        }
+      },
+      "goals": {
+        "home": 2,
+        "away": 0
+      }
+    },
+    {
+      "fixture": {
+        "id": 1018,
+        "date": "2025-06-25T17:00:00Z",
+        "timestamp": 1750870800,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        },
+        "away": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        }
+      },
+      "goals": {
+        "home": 2,
+        "away": 3
+      }
+    },
+    {
+      "fixture": {
+        "id": 1019,
+        "date": "2025-06-25T19:00:00Z",
+        "timestamp": 1750878000,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        },
+        "away": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        }
+      },
+      "goals": {
+        "home": 0,
+        "away": 1
+      }
+    },
+    {
+      "fixture": {
+        "id": 1020,
+        "date": "2025-06-27T17:00:00Z",
+        "timestamp": 1751043600,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        },
+        "away": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        }
+      },
+      "goals": {
+        "home": 3,
+        "away": 1
+      }
+    },
+    {
+      "fixture": {
+        "id": 1021,
+        "date": "2025-06-27T19:00:00Z",
+        "timestamp": 1751050800,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        },
+        "away": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        }
+      },
+      "goals": {
+        "home": 2,
+        "away": 0
+      }
+    },
+    {
+      "fixture": {
+        "id": 1022,
+        "date": "2025-06-29T17:00:00Z",
+        "timestamp": 1751216400,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        },
+        "away": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        }
+      },
+      "goals": {
+        "home": 0,
+        "away": 2
+      }
+    },
+    {
+      "fixture": {
+        "id": 1023,
+        "date": "2025-06-29T19:00:00Z",
+        "timestamp": 1751223600,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2024,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        },
+        "away": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        }
+      },
+      "goals": {
+        "home": 1,
+        "away": 2
+      }
+    },
+    {
+      "fixture": {
+        "id": 1024,
+        "date": "2025-07-01T17:00:00Z",
+        "timestamp": 1751389200,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        },
+        "away": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        }
+      },
+      "goals": {
+        "home": 3,
+        "away": 2
+      }
+    },
+    {
+      "fixture": {
+        "id": 1025,
+        "date": "2025-07-01T19:00:00Z",
+        "timestamp": 1751396400,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        },
+        "away": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        }
+      },
+      "goals": {
+        "home": 0,
+        "away": 0
+      }
+    },
+    {
+      "fixture": {
+        "id": 1026,
+        "date": "2025-07-03T17:00:00Z",
+        "timestamp": 1751562000,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        },
+        "away": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        }
+      },
+      "goals": {
+        "home": 0,
+        "away": 3
+      }
+    },
+    {
+      "fixture": {
+        "id": 1027,
+        "date": "2025-07-03T19:00:00Z",
+        "timestamp": 1751569200,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        },
+        "away": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        }
+      },
+      "goals": {
+        "home": 0,
+        "away": 1
+      }
+    },
+    {
+      "fixture": {
+        "id": 1028,
+        "date": "2025-07-05T17:00:00Z",
+        "timestamp": 1751734800,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        },
+        "away": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        }
+      },
+      "goals": {
+        "home": 3,
+        "away": 0
+      }
+    },
+    {
+      "fixture": {
+        "id": 1029,
+        "date": "2025-07-05T19:00:00Z",
+        "timestamp": 1751742000,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        },
+        "away": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        }
+      },
+      "goals": {
+        "home": 2,
+        "away": 1
+      }
+    },
+    {
+      "fixture": {
+        "id": 1030,
+        "date": "2025-07-07T17:00:00Z",
+        "timestamp": 1751907600,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        },
+        "away": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        }
+      },
+      "goals": {
+        "home": 2,
+        "away": 2
+      }
+    },
+    {
+      "fixture": {
+        "id": 1031,
+        "date": "2025-07-07T19:00:00Z",
+        "timestamp": 1751914800,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        },
+        "away": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        }
+      },
+      "goals": {
+        "home": 0,
+        "away": 1
+      }
+    },
+    {
+      "fixture": {
+        "id": 1032,
+        "date": "2025-07-09T17:00:00Z",
+        "timestamp": 1752080400,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        },
+        "away": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        }
+      },
+      "goals": {
+        "home": 3,
+        "away": 1
+      }
+    },
+    {
+      "fixture": {
+        "id": 1033,
+        "date": "2025-07-09T19:00:00Z",
+        "timestamp": 1752087600,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        },
+        "away": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        }
+      },
+      "goals": {
+        "home": 2,
+        "away": 0
+      }
+    },
+    {
+      "fixture": {
+        "id": 1034,
+        "date": "2025-07-11T17:00:00Z",
+        "timestamp": 1752253200,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        },
+        "away": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        }
+      },
+      "goals": {
+        "home": 0,
+        "away": 3
+      }
+    },
+    {
+      "fixture": {
+        "id": 1035,
+        "date": "2025-07-11T19:00:00Z",
+        "timestamp": 1752260400,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        },
+        "away": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        }
+      },
+      "goals": {
+        "home": 1,
+        "away": 1
+      }
+    },
+    {
+      "fixture": {
+        "id": 1036,
+        "date": "2025-07-13T17:00:00Z",
+        "timestamp": 1752426000,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        },
+        "away": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        }
+      },
+      "goals": {
+        "home": 3,
+        "away": 1
+      }
+    },
+    {
+      "fixture": {
+        "id": 1037,
+        "date": "2025-07-13T19:00:00Z",
+        "timestamp": 1752433200,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        },
+        "away": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        }
+      },
+      "goals": {
+        "home": 1,
+        "away": 0
+      }
+    },
+    {
+      "fixture": {
+        "id": 1038,
+        "date": "2025-07-15T17:00:00Z",
+        "timestamp": 1752598800,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 3,
+          "name": "Equipe fictive 3"
+        },
+        "away": {
+          "id": 1,
+          "name": "Equipe fictive 1"
+        }
+      },
+      "goals": {
+        "home": 1,
+        "away": 2
+      }
+    },
+    {
+      "fixture": {
+        "id": 1039,
+        "date": "2025-07-15T19:00:00Z",
+        "timestamp": 1752606000,
+        "status": {
+          "short": "FT"
+        }
+      },
+      "league": {
+        "id": 39,
+        "season": 2025,
+        "name": "Ligue synthétique",
+        "country": "Démo"
+      },
+      "teams": {
+        "home": {
+          "id": 4,
+          "name": "Equipe fictive 4"
+        },
+        "away": {
+          "id": 2,
+          "name": "Equipe fictive 2"
+        }
+      },
+      "goals": {
+        "home": 0,
+        "away": 2
+      }
+    }
+  ]
+}

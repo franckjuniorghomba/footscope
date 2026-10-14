@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "seasons": [2023, 2024, 2025],
+  "leagues": [39, 179, 78, 135, 140, 61, 88, 144, 94, 203],
+  "developmentStart": "2024-07-01",
+  "testStart": "2025-07-01",
+  "testEnd": "2026-07-01",
+  "bootstrapReplicates": 2000,
+  "seed": 167
+}
