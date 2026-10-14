@@ -5,33 +5,37 @@ export function distribution(lambda) {
   for (let i = 1; i < 30; i++) p.push((p[i - 1] * lambda) / i);
   return p;
 }
-export function eventProbability(market, selection, lh, la) {
-  const h = distribution(lh),
-    a = distribution(la);
-  let prob = 0;
-  const total = selection.match(/^(Over|Under) (\d+\.5)$/); // half-goal lines only: no refunds
-  if (!(
-    (market === 'Goals Over/Under' && total) ||
-    (market === 'Both Teams Score' && ['Yes', 'No'].includes(selection)) ||
-    (market === 'Match Winner' && ['Home', 'Draw', 'Away'].includes(selection)) ||
-    (market === 'Double Chance' && ['Home/Draw', 'Draw/Away', 'Home/Away'].includes(selection))
-  ))
-    return null;
-  for (let i = 0; i < h.length; i++)
-    for (let j = 0; j < a.length; j++) {
-      let wins = false;
-      if (market === 'Goals Over/Under')
-        wins = total[1] === 'Over' ? i + j > Number(total[2]) : i + j < Number(total[2]);
-      if (market === 'Both Teams Score')
-        wins = selection === 'Yes' ? i > 0 && j > 0 : i === 0 || j === 0;
-      if (market === 'Match Winner')
-        wins = selection === 'Home' ? i > j : selection === 'Away' ? i < j : i === j;
-      if (market === 'Double Chance')
-        wins = selection === 'Home/Draw' ? i >= j : selection === 'Draw/Away' ? j >= i : i !== j;
-      if (wins) prob += h[i] * a[j];
-    }
-  return Math.min(1, prob);
+function createEventProbability(getDistribution) {
+  return function eventProbability(market, selection, lh, la) {
+    const h = getDistribution(lh),
+      a = getDistribution(la);
+    let prob = 0;
+    const total = selection.match(/^(Over|Under) (\d+\.5)$/); // half-goal lines only: no refunds
+    if (!(
+      (market === 'Goals Over/Under' && total) ||
+      (market === 'Both Teams Score' && ['Yes', 'No'].includes(selection)) ||
+      (market === 'Match Winner' && ['Home', 'Draw', 'Away'].includes(selection)) ||
+      (market === 'Double Chance' && ['Home/Draw', 'Draw/Away', 'Home/Away'].includes(selection))
+    ))
+      return null;
+    for (let i = 0; i < h.length; i++)
+      for (let j = 0; j < a.length; j++) {
+        let wins = false;
+        if (market === 'Goals Over/Under')
+          wins = total[1] === 'Over' ? i + j > Number(total[2]) : i + j < Number(total[2]);
+        if (market === 'Both Teams Score')
+          wins = selection === 'Yes' ? i > 0 && j > 0 : i === 0 || j === 0;
+        if (market === 'Match Winner')
+          wins = selection === 'Home' ? i > j : selection === 'Away' ? i < j : i === j;
+        if (market === 'Double Chance')
+          wins = selection === 'Home/Draw' ? i >= j : selection === 'Draw/Away' ? j >= i : i !== j;
+        if (wins) prob += h[i] * a[j];
+      }
+    return Math.min(1, prob);
+  };
 }
+export const eventProbability = createEventProbability(distribution);
+
 function teamHistory(list, id, cutoff) {
   return (list || [])
     .filter(
@@ -74,6 +78,13 @@ export function assessMatch(d, now = Date.now()) {
   const lineupsConfirmed = (d.lineups || []).filter((x) => x.startXI?.length === 11).length >= 2;
   if (f.fixture.timestamp * 1000 - now < 90 * 60000 && !lineupsConfirmed)
     common.push('Compositions non confirmées à moins de 90 minutes du match.');
+  // These caches belong to this assessment only; lambdas vary across sensitivity scenarios.
+  const distributions = new Map(),
+    probabilities = new Map();
+  const probability = createEventProbability((lambda) => {
+    if (!distributions.has(lambda)) distributions.set(lambda, distribution(lambda));
+    return distributions.get(lambda);
+  });
   const events = [];
   for (const record of d.odds || [])
     for (const book of record.bookmakers || [])
@@ -81,24 +92,26 @@ export function assessMatch(d, now = Date.now()) {
         for (const v of market.values || []) {
           const odd = Number(v.odd);
           if (!Number.isFinite(odd) || odd <= 1) continue;
-          const p = enough ? eventProbability(market.name, v.value, lh, la) : null;
+          const key = JSON.stringify([market.name, v.value]);
+          if (!probabilities.has(key)) {
+            const p = enough ? probability(market.name, v.value, lh, la) : null;
+            // Sensitivity envelope, NOT a calibrated confidence interval.
+            let prudent = null;
+            if (p !== null) {
+              prudent = p;
+              for (const sh of [0.75, 1, 1.25])
+                for (const sa of [0.75, 1, 1.25])
+                  prudent = Math.min(prudent, probability(market.name, v.value, lh * sh, la * sa));
+              prudent = Math.max(0, prudent - 0.05);
+            }
+            probabilities.set(key, { p, prudent });
+          }
+          const { p, prudent } = probabilities.get(key);
           const reasons = [...common],
             age = now - Date.parse(record.update);
           if (!Number.isFinite(age) || age < -300000 || age > POLICY.maxOddsAgeMs)
             reasons.push('Cote absente, future ou âgée de plus de 30 minutes.');
           if (p === null) reasons.push('Marché non modélisé : aucune validation automatique.');
-          // Sensitivity envelope, NOT a calibrated confidence interval.
-          let prudent = null;
-          if (p !== null) {
-            prudent = p;
-            for (const sh of [0.75, 1, 1.25])
-              for (const sa of [0.75, 1, 1.25])
-                prudent = Math.min(
-                  prudent,
-                  eventProbability(market.name, v.value, lh * sh, la * sa),
-                );
-            prudent = Math.max(0, prudent - 0.05);
-          }
           const edge = prudent === null ? null : prudent * odd - 1;
           if (p !== null && p < POLICY.minProbability)
             reasons.push('Probabilité exploratoire inférieure à 70 %.');
