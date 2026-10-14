@@ -1,10 +1,10 @@
 import { fixedDay, fixturesForDay } from './provider.js';
-import { POLICY } from './policy.js';
+import { POLICY, MODEL_VERSION } from './policy.js';
 import { json } from './http.js';
 import { putJob, universeJob } from './jobs.js';
 import { scan } from './evidence.js';
 import { BELOW_THRESHOLD_REASON, selectCouponDetailed } from './coupon.js';
-import { llmExplanation } from './llm.js';
+import { llmExplanation, statisticalSummary } from './llm.js';
 import { settle } from './storage.js';
 
 // Clé de scellement dédiée, dérivée de API_FOOTBALL_KEY par HKDF-SHA-256 : la clé du
@@ -59,6 +59,69 @@ async function unseal(env, token) {
   const p = JSON.parse(token.payload);
   if (!(p.expires >= Date.now())) throw Error('Analyse expirée. Relancez la vérification.');
   return p.report;
+}
+
+// Même admissibilité temporelle que le compositeur ; aucune nouvelle admission.
+// Seuls les meilleurs candidats par match/bookmaker, hors matchs déjà retenus,
+// peuvent expliquer pourquoi ajouter un match ferait passer sous le seuil.
+function thresholdExcludedCandidates(reports, ticket, now) {
+  const bookKey = (name) => (name.trim().toLowerCase() === 'bet365' ? 'Bet365' : name);
+  const selected = new Set(ticket.selections.map((e) => e.matchId));
+  const combined = ticket.ticketProbability ?? 1;
+  const candidates = new Map();
+  for (const report of reports) {
+    if (now - Date.parse(report.retrievedAt) > 15 * 60000) continue;
+    for (const e of report.events) {
+      const age = now - Date.parse(e.updated);
+      if (
+        selected.has(e.matchId) ||
+        e.status !== 'simulation_eligible' ||
+        !Number.isFinite(e.prudentProbability) ||
+        e.prudentProbability <= 0 ||
+        e.prudentProbability > 1 ||
+        !(Date.parse(e.kickoff) > now) ||
+        !(age >= -300000 && age <= POLICY.maxOddsAgeMs) ||
+        (ticket.bookmaker && bookKey(e.bookmaker) !== bookKey(ticket.bookmaker))
+      )
+        continue;
+      const key = JSON.stringify([e.matchId, bookKey(e.bookmaker)]);
+      const previous = candidates.get(key);
+      if (
+        !previous ||
+        e.prudentProbability > previous.prudentProbability ||
+        (e.prudentProbability === previous.prudentProbability &&
+          e.prudentEdge > previous.prudentEdge)
+      )
+        candidates.set(key, e);
+    }
+  }
+  const excluded = [...candidates.values()]
+    .filter((e) => combined * e.prudentProbability < POLICY.minTicketProbability)
+    // Départage indépendant de l’ordre de collecte : match numérique croissant,
+    // puis bookmaker canonique en ordre lexicographique (sans locale).
+    .sort((a, b) => {
+      const left = bookKey(a.bookmaker),
+        right = bookKey(b.bookmaker);
+      return (
+        b.prudentProbability - a.prudentProbability ||
+        a.matchId - b.matchId ||
+        (left < right ? -1 : left > right ? 1 : 0)
+      );
+    });
+  return {
+    count: excluded.length,
+    candidates: excluded.slice(0, 5).map((e) => ({
+      matchId: e.matchId,
+      match: e.match,
+      bookmaker: e.bookmaker,
+      market: e.market,
+      selection: e.selection,
+      probability: e.probability,
+      prudentProbability: e.prudentProbability,
+      ticketProbabilityIfAdded: combined * e.prudentProbability,
+      reason: 'TICKET_PROBABILITY_BELOW_THRESHOLD',
+    })),
+  };
 }
 
 export async function assistant(req, env, path) {
@@ -181,7 +244,9 @@ export async function assistant(req, env, path) {
   let selections = [],
     reviews = [],
     blockers = [],
-    ticket = null;
+    ticket = null,
+    excludedCandidates = [],
+    excludedCandidatesCount = 0;
   const scope = preparedJob?.scope || body.scope || {};
   if (proposing) {
     const allowed = reports.filter(
@@ -213,7 +278,11 @@ export async function assistant(req, env, path) {
               'Aucune cote exploitable.'),
         );
     }
-    ticket = selectCouponDetailed(allowed);
+    const now = Date.now();
+    ticket = selectCouponDetailed(allowed, now);
+    const excluded = thresholdExcludedCandidates(allowed, ticket, now);
+    excludedCandidates = excluded.candidates;
+    excludedCandidatesCount = excluded.count;
     selections = ticket.selections;
   } else {
     if (!Array.isArray(body.selections) || body.selections.length < 1 || body.selections.length > 4)
@@ -275,12 +344,15 @@ export async function assistant(req, env, path) {
     policy: POLICY,
     generatedAt: new Date().toISOString(),
     combinedOdds: selections.length ? selections.reduce((p, x) => p * x.odd, 1) : null,
-    combinedProbability: null,
+    combinedProbability: ticket?.ticketProbability ?? null,
+    modelVersion: MODEL_VERSION,
     // Métadonnées du ticket calculées par le serveur (null hors proposition) : le LLM les
     // explique sans les recalculer, et le motif d'absence remplace un message générique.
     ticketProbability: ticket?.ticketProbability ?? null,
     ticketProbabilityExploratory: ticket?.ticketProbabilityExploratory ?? null,
     minTicketProbability: POLICY.minTicketProbability,
+    excludedCandidates,
+    excludedCandidatesCount,
     noTicketReason: ticket?.noTicketReason ?? null,
     risks: [
       'Modèle non validé hors échantillon.',
@@ -312,7 +384,7 @@ export async function assistant(req, env, path) {
   } catch {
     explanation = {
       engine: 'statistics',
-      summary: 'Filtres appliqués ; explication LLM indisponible.',
+      summary: statisticalSummary(result),
     };
   }
   // Sans explication du LLM, le motif d'absence calculé par le serveur reste le résumé.
