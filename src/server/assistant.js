@@ -6,6 +6,7 @@ import { scan } from './evidence.js';
 import { BELOW_THRESHOLD_REASON, selectCouponDetailed } from './coupon.js';
 import { llmExplanation, statisticalSummary } from './llm.js';
 import { settle } from './storage.js';
+import { marketValueSummary } from './market.js';
 
 // Clé de scellement dédiée, dérivée de API_FOOTBALL_KEY par HKDF-SHA-256 : la clé du
 // fournisseur ne sert plus directement de clé HMAC. Le sel est fixe et public (séparation
@@ -247,6 +248,8 @@ export async function assistant(req, env, path) {
     ticket = null,
     excludedCandidates = [],
     excludedCandidatesCount = 0;
+  // Événements serveur seulement, pour la valeur face au marché (jamais l'entrée du client).
+  const reviewedEvents = [];
   const scope = preparedJob?.scope || body.scope || {};
   if (proposing) {
     const allowed = reports.filter(
@@ -299,6 +302,10 @@ export async function assistant(req, env, path) {
             y.market === x.market && y.selection === x.selection && y.bookmaker === x.bookmaker,
         );
       if (!ev) {
+        reviewedEvents.push({
+          missing: true,
+          matchId: Number.isInteger(x.matchId) ? x.matchId : null,
+        });
         reviews.push({
           ...x,
           status: 'insufficient',
@@ -317,6 +324,7 @@ export async function assistant(req, env, path) {
         e.reasons.push('Cote à actualiser.');
       }
       reviews.push(e);
+      reviewedEvents.push(e);
     }
   }
   const verdict = proposing
@@ -370,6 +378,21 @@ export async function assistant(req, env, path) {
     evaluatedEvents: reports.reduce((n, r) => n + (r.evaluatedEvents ?? r.events.length), 0),
   };
   result.blockers = result.blockers.slice(0, 20);
+  // BIS-200 : valeur face au marché, descriptive. Rangée dans « market » racine, que
+  // buildLlmInput retire : ni le LLM ni le ticket ne la voient.
+  result.market = marketValueSummary(reports, {
+    selection: selections,
+    review: reviewedEvents,
+    excluded: excludedCandidates.map(
+      (c) =>
+        reports
+          .find((r) => r.matchId === c.matchId)
+          ?.events.find(
+            (e) =>
+              e.market === c.market && e.selection === c.selection && e.bookmaker === c.bookmaker,
+          ) ?? { missing: true, matchId: c.matchId },
+    ),
+  });
   let explanation;
   try {
     explanation =

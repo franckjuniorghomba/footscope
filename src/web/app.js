@@ -904,7 +904,63 @@ function verdictLabel(v) {
     }[v] || 'NON ÉVALUABLE'
   );
 }
-function eventHTML(x) {
+// BIS-200 : valeur face au marché fournie par le serveur (d.market), jamais recalculée ici.
+// Descriptive : elle ne dit pas qu'une sélection est gagnante et ne change pas le ticket.
+function valueCheck(market, x, roles) {
+  return (market?.checks || []).find(
+    (c) =>
+      roles.includes(c.role) &&
+      c.matchId === x.matchId &&
+      c.marketName === x.market &&
+      c.selection === x.selection &&
+      c.bookmaker === x.bookmaker,
+  );
+}
+const signedPercent = (v) =>
+  (v > 0 ? '+' : v < 0 ? '−' : '') +
+  Math.abs(v * 100).toLocaleString('fr-FR', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }) +
+  '\u00a0%';
+function valueBadge(check) {
+  if (!check) return '';
+  if (!Number.isFinite(check.marketValue))
+    return (
+      '<span class="valuebadge"><span class="tag muted">Valeur face au marché : —</span><small>' +
+      esc(check.reason || 'Pas de repère Pinnacle.') +
+      '</small></span>'
+    );
+  const fair =
+    'cote juste Pinnacle\u00a0' +
+    check.fairOdd.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return check.hasValue
+    ? '<span class="valuebadge"><span class="tag ok">Valeur face au marché\u00a0' +
+        signedPercent(check.marketValue) +
+        '</span><small>bet365 au-dessus de la ' +
+        fair +
+        '</small></span>'
+    : '<span class="valuebadge"><span class="tag muted">Sous la cote juste\u00a0' +
+        signedPercent(check.marketValue) +
+        '</span><small>bet365 au plus à la ' +
+        fair +
+        '</small></span>';
+}
+// Ticket entier : « oui » seulement si chaque sélection a une valeur calculée positive.
+function valueFact(market) {
+  if (
+    !market ||
+    market.allSelectionsHaveValue === null ||
+    market.allSelectionsHaveValue === undefined
+  )
+    return '';
+  return (
+    '<div class="valuefact"><dt>Valeur face au marché</dt><dd>Toutes les sélections : ' +
+    (market.allSelectionsHaveValue ? 'oui' : 'non') +
+    '<small>bet365 contre cote juste Pinnacle · repère descriptif, pas une promesse de gain</small></dd></div>'
+  );
+}
+function eventHTML(x, market, roles) {
   return (
     '<div class="eventitem"><b>' +
     esc(x.match) +
@@ -919,6 +975,7 @@ function eventHTML(x) {
     '">' +
     verdictLabel(x.status) +
     '</span>' +
+    valueBadge(valueCheck(market, x, roles)) +
     (x.probability !== null && x.probability !== undefined
       ? '<p class="note">Estimation exploratoire : ' +
         (x.probability * 100).toFixed(1) +
@@ -939,7 +996,7 @@ function eventHTML(x) {
     '</p></div>'
   );
 }
-function pickHTML(x) {
+function pickHTML(x, market) {
   return (
     '<li class="pick"><span class="crests">' +
     String(x.match ?? '')
@@ -958,7 +1015,9 @@ function pickHTML(x) {
     kickoff(x.kickoff) +
     '</span></div><span class="odd"><span class="visually-hidden">Cote </span>' +
     Number(x.odd).toFixed(2) +
-    '</span></li>'
+    '</span>' +
+    valueBadge(valueCheck(market, x, ['selection'])) +
+    '</li>'
   );
 }
 // Le ticket du jour : sélections, bookmaker, cote combinée et, si l'API la fournit,
@@ -987,7 +1046,7 @@ function showAssistant(d) {
     '</p>' +
     (picks.length
       ? '<ol class="picks">' +
-        picks.map(pickHTML).join('') +
+        picks.map((x) => pickHTML(x, d.market)).join('') +
         '</ol><dl class="ticketfacts"><div><dt>Bookmaker</dt><dd>' +
         esc([...new Set(picks.map((x) => x.bookmaker))].join(', ')) +
         '</dd></div>' +
@@ -1003,8 +1062,11 @@ function showAssistant(d) {
               : '') +
             '</small></dd></div>'
           : '') +
+        valueFact(d.market) +
         '</dl>'
-      : '') +
+      : reviews.length && d.market
+        ? '<dl class="ticketfacts">' + valueFact(d.market) + '</dl>'
+        : '') +
     (d.analyzed !== undefined
       ? '<p class="note coverage">' +
         d.analyzed +
@@ -1025,8 +1087,8 @@ function showAssistant(d) {
         (notes.length
           ? '<ul class="reasons">' + notes.map((n) => '<li>' + esc(n) + '</li>').join('') + '</ul>'
           : '') +
-        reviews.map(eventHTML).join('') +
-        picks.map(eventHTML).join('') +
+        reviews.map((x) => eventHTML(x, d.market, ['review'])).join('') +
+        picks.map((x) => eventHTML(x, d.market, ['selection'])).join('') +
         '</details>'
       : '') +
     (picks.length
