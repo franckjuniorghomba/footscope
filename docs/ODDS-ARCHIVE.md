@@ -6,9 +6,9 @@ Statut : l’archive (parties 1 et 2) est en place ; la capture de clôture (par
 
 `api()` (`src/server/provider.js`) appelle `archiveOdds()` (`src/server/odds-archive.js`) **uniquement** après une réponse réseau réussie d’un chemin `odds?…`. Les succès de cache (mémoire, R2), les rattachements à une requête en cours, les erreurs et les pauses du fournisseur n’arrivent jamais à l’archive. Le cache, l’espacement de 6,5 s, la file partagée `api-control/` et les compteurs de `/api/diagnostics.cache` ne changent pas.
 
-Clé : `odds-archive/<AAAA-MM-JJ>/<fixtureId>/<update>.json`, où le jour est celui du coup d’envoi en GMT−5 fixe (celui du relevé si le coup d’envoi manque) et `<update>` l’horodatage `update` du fournisseur au format ISO compact (`20261014T135650592Z`).
+Clé : `odds-archive/<AAAA-MM-JJ>/<fixtureId>/<update>.json`, où le jour est celui de l’horodatage `update` du relevé en GMT−5 fixe et `<update>` cet horodatage au format ISO compact (`20261014T135650592Z`). La clé ne dépend donc que de la paire `(fixtureId, update)` : un coup d’envoi absent, déplacé ou corrigé entre deux réponses ne crée jamais une deuxième écriture du même relevé. Pour retrouver les relevés d’un match joué le jour J, lire les préfixes des jours précédant J (les relevés arrivent avant le coup d’envoi) et filtrer sur `fixtureId` ; le coup d’envoi reste dans le contenu (`kickoff`).
 
-Contenu (version 1) : `fixtureId`, `league` (id, nom, pays, saison), `kickoff`, `update`, `retrievedAt`, `query` (chemin fournisseur, sans clé), `truncated`, `droppedBookmakers` et `bookmakers[]` → `{ id, name, markets[] → { name, values[] → { value, odd } } }`. Seuls les marchés gérés sont gardés (`Match Winner`, `Double Chance`, `Goals Over/Under`, `Both Teams Score`), une fois chacun par bookmaker. Une cote illisible ou ≤ 1 est écartée, jamais complétée. Aucune clé, aucune identité de visiteur.
+Contenu (version 1) : `fixtureId`, `league` (id, nom, pays, saison), `kickoff`, `update`, `retrievedAt`, `query` (chemin fournisseur, sans clé), `truncated`, `droppedBookmakers` et `bookmakers[]` → `{ id, name, markets[] → { name, values[] → { value, odd } } }`. Seuls les marchés gérés sont gardés (`Match Winner`, `Double Chance`, `Goals Over/Under`, `Both Teams Score`), une fois chacun par bookmaker. Une cote illisible ou ≤ 1 est écartée, jamais complétée. Chaque champ est converti seulement s’il a le type attendu (chaîne, nombre) : un champ d’un autre type (par exemple `fixture.date: {"toString": null}`) devient `null` ou écarte la valeur, sans exception. Aucune clé, aucune identité de visiteur.
 
 Bornes :
 
@@ -18,13 +18,14 @@ Bornes :
 | Taille d’un objet                  | 32 768 octets   | derniers bookmakers retirés, `truncated: true`                            |
 | Bookmakers / valeurs par marché    | 40 / 40         | au-delà : comptés dans `droppedBookmakers` ou ignorés                     |
 | Matchs par réponse                 | 100             | au-delà : comptés `skipped`                                               |
-| Attente de l’analyse sur l’archive | 2 s par réponse | au-delà : l’analyse continue, compté `timeouts`                           |
+| Attente de l’analyse sur l’archive | 0               | écriture en tâche de fond (`waitUntil`), voir ci-dessous                  |
+| Durée d’une tâche d’archive        | 2 s par réponse | au-delà : la tâche se termine, compté `timeouts`                          |
 
-Panne : une écriture refusée est journalisée (`console.warn`, type d’erreur seulement) et comptée. `/api/diagnostics` expose `oddsArchive` : `responses`, `written`, `duplicates`, `truncated`, `skipped`, `failures`, `timeouts`, `lastFailureAt` (portée : isolat, comme `cache`). Aucune valeur de requête ni de configuration n’y figure.
+Panne : aucune exception ne sort de l’archive. Une écriture refusée, une ligne qui lève pendant sa construction ou une réponse illisible est journalisée (`console.warn`, type d’erreur seulement) et comptée ; les autres lignes de la même réponse sont archivées normalement. `/api/diagnostics` expose `oddsArchive` : `responses`, `written`, `duplicates`, `truncated`, `skipped` (ligne sans identifiant, relevé ou cote exploitable), `rejected` (ligne qui a levé une exception), `failures`, `timeouts`, `lastFailureAt` (portée : isolat, comme `cache`). Aucune valeur de requête, de réponse ni de configuration n’y figure.
 
-Choix prudent : le Worker ne transmet pas encore de contexte d’exécution (`waitUntil`) jusqu’à `api()` ; l’écriture est donc attendue, bornée à 2 s, et ne rejette jamais. Une écriture R2 saine prend quelques dizaines de millisecondes, à comparer aux 6,5 s d’espacement entre deux appels.
+Hors du chemin critique : `api()` n’attend jamais l’archive. Les relevés sont construits à partir de la réponse dès sa réception, puis les écritures R2 continuent en tâche de fond. `fetch(req, env, ctx)` (`src/server/app.js`) attache le contexte d’exécution à `env` par `withExecutionContext` (propriété non énumérable, signatures des modules inchangées) ; `api()` confie alors la tâche à `ctx.waitUntil`, qui garde le Worker en vie jusqu’à la fin de l’écriture sans retarder la réponse. Sans contexte (Node, tests), la promesse est détachée et ses erreurs absorbées. Mesure (`tests/odds-archive.mjs` §8, délai réel de 2 s) : réponse HTTP en quelques millisecondes avec R2 sain, avec un `put` bloqué jusqu’à la fin de la réponse, et avec un `put` qui ne répond jamais ; avant la correction, 2 004 ms avec le `put` bloqué.
 
-Preuve : `tests/odds-archive.mjs` (2 relevés → 2 objets, rejeu identique et succès de cache → 0, même nombre de requêtes avec ou sans archive, panne ou blocage R2 → ticket identique, plafond de taille) ; `tests/full-universe.mjs` affiche toujours `Requests: 20`.
+Preuve : `tests/odds-archive.mjs` (2 relevés → 2 objets, rejeu identique et succès de cache → 0, même nombre de requêtes avec ou sans archive, panne ou blocage R2 → ticket identique, `put` bloqué → aucune latence, coup d’envoi présent puis absent puis déplacé → 1 écriture, ligne mal formée → réponse et autres lignes intactes, plafond en octets avec 40 bookmakers × 4 marchés × 40 valeurs multioctets → 1 bookmaker gardé, 39 retirés) ; `tests/full-universe.mjs` affiche toujours `Requests: 20`.
 
 ## 2. Limite de l’archive seule
 
@@ -36,24 +37,31 @@ Notations : `N` = matchs du périmètre habituel sur une journée GMT−5, `M` =
 
 ### Option A — déclencheur planifié, `odds?fixture=<id>` près du coup d’envoi (recommandée)
 
-Un déclencheur `scheduled` du Worker toutes les 5 minutes sélectionne les matchs du périmètre dont le coup d’envoi tombe dans une fenêtre `[T−45 min ; T−5 min]` et pas encore captés, puis appelle `odds?fixture=<id>` pour chacun, par la même fonction `api()`. Le relevé est archivé par la partie 1, sans code d’archive supplémentaire. Le calendrier vient des `fixtures?date` du jour, déjà en cache quand une analyse a tourné ; sinon 2 appels par jour (jour J et J+1, comme `fixturesForDay`).
+Un déclencheur `scheduled` du Worker toutes les 5 minutes sélectionne les matchs du périmètre dont le coup d’envoi tombe dans une fenêtre `[T−45 min ; T−5 min]` et pas encore captés, puis appelle `odds?fixture=<id>` pour chacun, par la même fonction `api()`. Le relevé est archivé par la partie 1, sans code d’archive supplémentaire.
+
+Calendrier : **il ne vient pas gratuitement du cache actuel.** `fixturesForDay` lit `fixtures?date` (J et J+1) avec un cache de **5 minutes** (`src/server/provider.js`). Un déclencheur toutes les 5 minutes qui l’appellerait tel quel referait ces 2 appels à presque chaque passage, soit jusqu’à 2 × 288 = 576 appels par jour. L’option A suppose donc un calendrier quotidien conservé explicitement : le déclencheur lit `fixtures?date` avec une durée de validité longue (paramètre `ttl` de `api()`, cache R2 partagé entre serveurs), rafraîchie `R` fois par jour pour suivre les reports. Hypothèse retenue : `R = 4` (validité 6 h), soit 2 × 4 = 8 appels par jour. Les passages entre deux rafraîchissements ne font aucun appel de calendrier ; un coup d’envoi déplacé après le dernier rafraîchissement est rattrapé par le `fixture.date` de la réponse `odds`, jamais deviné.
 
 Coût par jour :
 
 ```
-C_A = N × k + 2        (k = captures par match ; recommandation k = 1)
+C_A = N × k × (1 + r) + 2 × R
+  k = captures par match (recommandation k = 1)
+  r = part des captures à reprendre (refus du fournisseur, file pleine) ; nominal r = 0
+  R = rafraîchissements du calendrier par jour (hypothèse R = 4)
 ```
 
-| Périmètre N | Appels/jour (k = 1) | Occupation de la file (C_A × 6,5 s) | Part d’un quota de 7 500/jour | Part de 100/jour |
-| ----------- | ------------------- | ----------------------------------- | ----------------------------- | ---------------- |
-| 21          | 23                  | 2 min 30 s                          | 0,3 %                         | 23 %             |
-| 50          | 52                  | 5 min 38 s                          | 0,7 %                         | 52 %             |
-| 100         | 102                 | 11 min 3 s                          | 1,4 %                         | > 100 % ⚠        |
-| 300         | 302                 | 32 min 43 s                         | 4,0 %                         | > 100 % ⚠        |
+Un refus local `API_QUEUE_BUSY` ne consomme aucun appel ; une réponse 429 ou une erreur du fournisseur peut en consommer un, d’où `r`. Une capture reprise ne l’est qu’aux passages suivants dans la même fenêtre (au plus 8), jamais après le coup d’envoi. Ces appels s’ajoutent à ceux des analyses lancées par les visiteurs, qui partagent le même quota et la même file : le quota disponible pour la capture est `Q − C_analyses`, à lire sur `/api/status`.
 
-Vérification : 100 × 1 + 2 = 102 appels ; 102 × 6,5 s = 663 s = 11 min 3 s ; 102 / 7 500 = 1,36 %. `N = 21` est le périmètre du test `full-universe` ; le périmètre réel se lit dans les analyses (`prepared.ids.length`). Les quotas 100 et 7 500 sont les offres publiques gratuite et « Pro » d’API-Football, donnés à titre d’exemple ; l’abonnement réel se lit sur `/api/status` (`subscription`, `requests`).
+| Périmètre N | Appels/jour (k = 1, r = 0, R = 4) | Occupation de la file (C_A × 6,5 s) | Part d’un quota de 7 500/jour | Part de 100/jour |
+| ----------- | --------------------------------- | ----------------------------------- | ----------------------------- | ---------------- |
+| 21          | 29                                | 3 min 9 s                           | 0,4 %                         | 29 %             |
+| 50          | 58                                | 6 min 17 s                          | 0,8 %                         | 58 %             |
+| 100         | 108                               | 11 min 42 s                         | 1,4 %                         | > 100 % ⚠        |
+| 300         | 308                               | 33 min 22 s                         | 4,1 %                         | > 100 % ⚠        |
 
-Impact sur la file partagée : `reserveProviderSlot` refuse (`API_QUEUE_BUSY`) un créneau réservé plus de 60 s à l’avance. Un passage du déclencheur doit donc rester sous `60 s / 6,5 s` = **9 appels**, recommandation **8** (52 s), pour ne jamais faire refuser l’analyse d’un visiteur. Capacité : 8 appels × 8 passages dans la fenêtre de 40 min = 64 matchs par créneau de coup d’envoi. Pic typique : une quarantaine de matchs à la même heure le samedi, donc couvert ; au-delà, les matchs les plus proches du coup d’envoi passent d’abord et le reste est compté comme manqué, jamais inventé. Si le fournisseur demande une pause, le déclencheur s’arrête jusqu’au passage suivant (pause commune déjà gérée par `api-control/cooldown.json`).
+Vérification : 100 × 1 × (1 + 0) + 2 × 4 = 108 appels ; 108 × 6,5 s = 702 s = 11 min 42 s ; 108 / 7 500 = 1,44 %. Avec 10 % de reprises (`r = 0,1`) : 100 × 1,1 + 8 = 118 appels, 1,6 %. `N = 21` est le périmètre du test `full-universe` ; le périmètre réel se lit dans les analyses (`prepared.ids.length`). Les quotas 100 et 7 500 sont les offres publiques gratuite et « Pro » d’API-Football, donnés à titre d’exemple ; l’abonnement réel se lit sur `/api/status` (`subscription`, `requests`).
+
+Impact sur la file partagée : `reserveProviderSlot` refuse (`API_QUEUE_BUSY`) un créneau réservé plus de 60 s à l’avance. Sur une file **vide**, un passage tient en `60 s / 6,5 s` ≈ 9 appels ; **8 appels (52 s) est un plafond nominal, pas une garantie.** Si la file est déjà occupée par une analyse, la capacité restante est `floor((60 s − b) / 6,5 s) + 1` appels pour un arriéré `b` : avec `b = 50 s`, seulement 2 réservations passent, puis `API_QUEUE_BUSY` (mesuré par le relecteur). Le déclencheur doit donc, avant chaque appel, lire `api-control/next-slot.json` et s’arrêter dès que l’arriéré dépasse 2 créneaux (13 s), pour laisser la place aux visiteurs ; les captures restantes sont reportées au passage suivant (5 min plus tard, toujours dans la fenêtre), et une capture refusée n’est jamais remplacée par une valeur inventée. Capacité nominale : 8 appels × 8 passages dans la fenêtre de 40 min = 64 matchs par créneau de coup d’envoi, moins ce que les analyses occupent. Pic typique : une quarantaine de matchs à la même heure le samedi, donc couvert ; au-delà, les matchs les plus proches du coup d’envoi passent d’abord et le reste est compté comme manqué, jamais inventé. Si le fournisseur demande une pause, le déclencheur s’arrête jusqu’au passage suivant (pause commune déjà gérée par `api-control/cooldown.json`).
 
 ### Option B — déclencheur planifié, pages `odds?date`
 
@@ -72,5 +80,5 @@ Ne rien planifier : on garde l’archive de la partie 1 et on ajoute un bouton o
 ### Recommandation chiffrée
 
 1. **Maintenant, 0 appel** : laisser tourner l’archive une à deux semaines et mesurer, par match, l’écart `kickoff − update` des relevés et l’intervalle entre deux `update` successifs. La documentation publique d’API-Football annonce des cotes rafraîchies par intervalles de plusieurs heures (à vérifier) : si c’est le cas, un relevé à T−45 min vaut déjà la « dernière cote » disponible chez ce fournisseur, et c’est la limite à écrire dans le calcul du CLV.
-2. **Puis, sur décision du responsable** : option A, `k = 1`, déclencheur toutes les 5 minutes, fenêtre `[T−45 ; T−5]`, au plus 8 appels par passage. Coût attendu `N + 2` appels par jour, soit 102 pour 100 matchs (1,4 % d’un quota de 7 500), et au plus 52 s d’occupation de la file par passage. Le déploiement d’un déclencheur `scheduled` relève de l’humain.
+2. **Puis, sur décision du responsable** : option A, `k = 1`, déclencheur toutes les 5 minutes, fenêtre `[T−45 ; T−5]`, calendrier quotidien conservé et rafraîchi 4 fois par jour, au plus 8 appels par passage et arrêt dès que la file dépasse 13 s d’arriéré. Coût attendu `N × (1 + r) + 8` appels par jour, soit 108 pour 100 matchs sans reprise (1,4 % d’un quota de 7 500), et au plus 52 s d’occupation de la file par passage sur une file vide. Le déploiement d’un déclencheur `scheduled` relève de l’humain.
 3. À ne pas faire : l’option A sur un quota de 100 appels par jour dès que `N` dépasse environ 50, car l’analyse elle-même consomme le reste du quota.

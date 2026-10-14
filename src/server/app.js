@@ -1,4 +1,4 @@
-import { api, cacheMetrics, fixturesForDay } from './provider.js';
+import { api, cacheMetrics, fixturesForDay, withExecutionContext } from './provider.js';
 import { archiveMetrics } from './odds-archive.js';
 import { POLICY } from './policy.js';
 import { json } from './http.js';
@@ -8,7 +8,9 @@ import { exportEvidence, finishEvidence } from './jobs.js';
 import { page, css, clientScript, fonts } from '../../.build/web-assets.js';
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
+    // Le contexte suit `env` jusqu'à api() : les écritures d'archive passent par `waitUntil`.
+    env = withExecutionContext(env, ctx);
     const u = new URL(req.url);
     if (
       req.method !== 'GET' &&

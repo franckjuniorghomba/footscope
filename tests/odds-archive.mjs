@@ -1,20 +1,34 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { ARCHIVE_MAX_BYTES, archiveRecord } from '../src/server/odds-archive.js';
+import {
+  ARCHIVE_MAX_BYTES,
+  archiveMetrics,
+  archiveOdds,
+  archiveRecord,
+  resetArchiveMetrics,
+} from '../src/server/odds-archive.js';
 
 // Archive des cotes (BIS-192) : seules les réponses réellement reçues du fournisseur sont
 // archivées, un objet par (match, relevé), sans appel supplémentaire ni effet sur le ticket.
-const source = fs
+// Une promesse rejetée et oubliée par l'archive ferait échouer le test.
+const unhandled = [];
+process.on('unhandledRejection', (e) => unhandled.push(e));
+const unpaced = fs
   .readFileSync('dist/server/index.js', 'utf8')
-  .replace(/(?:var|const) API_SPACING_MS\s*=\s*6500\s*;/, 'var API_SPACING_MS = 0;')
-  .replace(/var ARCHIVE_TIMEOUT_MS\s*=\s*(?:2000|2e3)\s*;/, 'var ARCHIVE_TIMEOUT_MS = 50;');
+  .replace(/(?:var|const) API_SPACING_MS\s*=\s*6500\s*;/, 'var API_SPACING_MS = 0;');
+const source = unpaced.replace(
+  /var ARCHIVE_TIMEOUT_MS\s*=\s*(?:2000|2e3)\s*;/,
+  'var ARCHIVE_TIMEOUT_MS = 50;',
+);
 assert(source.includes('var ARCHIVE_TIMEOUT_MS = 50;'), 'Archive timeout must be patchable');
-const isolate = async (tag) =>
-  (
-    await import(
-      'data:text/javascript;base64,' + Buffer.from(source).toString('base64') + '#' + tag
-    )
-  ).default;
+const isolate = async (tag, code = source) =>
+  (await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64') + '#' + tag))
+    .default;
+// Contexte d'exécution simulé du Worker : collecte les tâches confiées à waitUntil.
+const executionContext = () => {
+  const tasks = [];
+  return { tasks, waitUntil: (p) => tasks.push(p), drain: () => Promise.all(tasks) };
+};
 
 const secret = 'mock-key-0123456789abcdef';
 const now = Date.now(),
@@ -53,7 +67,8 @@ const quote = (id, books = 1) => ({
 });
 let requests = 0,
   oddsRequests = 0,
-  hugePage = false;
+  hugePage = false,
+  datePage = null;
 globalThis.fetch = async (url, init) => {
   requests++;
   assert.equal(init.headers['x-apisports-key'], secret);
@@ -80,12 +95,12 @@ globalThis.fetch = async (url, init) => {
     oddsRequests++;
     if (u.searchParams.has('fixture')) response = [quote(Number(u.searchParams.get('fixture')))];
     else if (u.searchParams.get('date') === date)
-      response = hugePage ? [quote(1, 400)] : [quote(1), quote(2)];
+      response = datePage || (hugePage ? [quote(1, 400)] : [quote(1), quote(2)]);
   }
   return Response.json({ response, paging, errors: {} });
 };
 
-function memoryBucket(db, { failArchive = false, hangArchive = false } = {}) {
+function memoryBucket(db, { failArchive = false, hangArchive = false, holdArchive = null } = {}) {
   const stats = { archiveAttempts: 0 };
   return {
     stats,
@@ -96,6 +111,7 @@ function memoryBucket(db, { failArchive = false, hangArchive = false } = {}) {
         stats.archiveAttempts++;
         if (failArchive) throw Error('R2 indisponible ' + key);
         if (hangArchive) return new Promise(() => {});
+        if (holdArchive) await holdArchive;
       }
       const ifNone = options.onlyIf instanceof Headers && options.onlyIf.get('If-None-Match');
       if (ifNone === '*' && db.has(key)) return null;
@@ -111,7 +127,7 @@ function memoryBucket(db, { failArchive = false, hangArchive = false } = {}) {
 }
 const archiveKeys = (db) => [...db.keys()].filter((k) => k.startsWith('odds-archive/')).sort();
 
-async function analysis(w, env) {
+async function analysis(w, env, ctx) {
   const call = async (action, body) =>
     w.fetch(
       new Request('https://site/api/assistant/' + action, {
@@ -120,6 +136,7 @@ async function analysis(w, env) {
         body: JSON.stringify(body),
       }),
       env,
+      ctx,
     );
   const prepared = await (await call('prepare', { date })).json();
   assert.equal(prepared.ids.length, 2);
@@ -164,16 +181,20 @@ const diagnostics = async (w, env) => {
 const db = new Map();
 const env = { BUCKET: memoryBucket(db), API_FOOTBALL_KEY: secret };
 const w1 = await isolate('a');
-const baseline = await analysis(w1, env);
+const ctx1 = executionContext();
+const baseline = await analysis(w1, env, ctx1);
+assert(ctx1.tasks.length >= 2, 'Archive writes are handed to waitUntil');
+await ctx1.drain();
 const baselineRequests = requests;
 assert(baseline.selections.length > 0, 'The baseline must produce a ticket to compare');
 assert.equal(baseline.realMoneyEligible, false);
 const keys = archiveKeys(db);
 assert.equal(keys.length, 2, 'Two odds snapshots give two archive objects');
 const compact = (iso) => iso.replace(/[-:.]/g, '');
+// Le jour de la clé est celui du relevé `update` : l'identité ne dépend que de (match, update).
 assert.deepEqual(keys, [
-  'odds-archive/' + date + '/1/' + compact(T1) + '.json',
-  'odds-archive/' + date + '/2/' + compact(T2) + '.json',
+  'odds-archive/' + fixedDay(T1) + '/1/' + compact(T1) + '.json',
+  'odds-archive/' + fixedDay(T2) + '/2/' + compact(T2) + '.json',
 ]);
 const stored = JSON.parse(db.get(keys[0]));
 assert.deepEqual(stored, {
@@ -206,7 +227,9 @@ assert.equal(metrics.failures, 0);
 
 // 2. Succès de cache (mémoire puis R2) : aucune réponse archivée, aucune écriture.
 const oddsPage = 'https://site/api/odds?date=' + date + '&page=1';
-assert.equal((await w1.fetch(new Request(oddsPage), env)).status, 200);
+const ctx2 = executionContext();
+assert.equal((await w1.fetch(new Request(oddsPage), env, ctx2)).status, 200);
+await ctx2.drain();
 const afterMiss = requests,
   responsesBefore = (await diagnostics(w1, env)).responses,
   attemptsBefore = env.BUCKET.stats.archiveAttempts;
@@ -228,7 +251,9 @@ assert.equal(
 for (const k of [...db.keys()]) if (k.startsWith('api-cache/')) db.delete(k);
 const w3 = await isolate('replay');
 const oddsBefore = oddsRequests;
-const replay = await analysis(w3, env);
+const ctx3 = executionContext();
+const replay = await analysis(w3, env, ctx3);
+await ctx3.drain();
 assert(oddsRequests > oddsBefore, 'The replay really comes from the provider');
 assert.deepEqual(archiveKeys(db), keys, 'An identical snapshot adds no archive object');
 metrics = await diagnostics(w3, env);
@@ -261,9 +286,9 @@ for (const [tag, options] of [
   const brokenDb = new Map();
   const brokenEnv = { BUCKET: memoryBucket(brokenDb, options), API_FOOTBALL_KEY: secret };
   const w = await isolate(tag);
-  const started = performance.now();
-  const result = await analysis(w, brokenEnv);
-  assert(performance.now() - started < 5000, 'A stuck archive write stays bounded');
+  const brokenCtx = executionContext();
+  const result = await analysis(w, brokenEnv, brokenCtx);
+  await brokenCtx.drain();
   assert.deepEqual(stable(result), stable(baseline), tag + ': ticket unchanged');
   assert.equal(archiveKeys(brokenDb).length, 0);
   assert(brokenEnv.BUCKET.stats.archiveAttempts >= 2);
@@ -283,10 +308,14 @@ hugePage = true;
 const capDb = new Map();
 const capEnv = { BUCKET: memoryBucket(capDb), API_FOOTBALL_KEY: secret };
 const w6 = await isolate('cap');
+const ctx6 = executionContext();
 assert.equal(
-  (await w6.fetch(new Request('https://site/api/odds?date=' + date + '&page=1'), capEnv)).status,
+  (await w6.fetch(new Request('https://site/api/odds?date=' + date + '&page=1'), capEnv, ctx6))
+    .status,
   200,
 );
+await ctx6.drain();
+hugePage = false;
 const [capKey] = archiveKeys(capDb);
 const capBody = capDb.get(capKey);
 assert(new TextEncoder().encode(capBody).length <= ARCHIVE_MAX_BYTES);
@@ -328,10 +357,214 @@ assert.deepEqual(noKickRecord.bookmakers[0].markets, [
   { name: 'Match Winner', values: [{ value: 'Home', odd: '2.10' }] },
 ]);
 
+// 8. Hors du chemin critique : avec le `put` d'archive bloqué, la réponse arrive dans le même
+// délai qu'avec R2 sain. Délai réel de l'archive (2 s), sans le raccourcir.
+const timed = async (tag, bucket, ctx) => {
+  const w = await isolate(tag, unpaced);
+  const e = { BUCKET: bucket, API_FOOTBALL_KEY: secret };
+  const started = performance.now();
+  const r = await w.fetch(new Request(oddsPage), e, ctx);
+  const ms = performance.now() - started;
+  assert.equal(r.status, 200);
+  assert.equal((await r.json()).response.length, 2, tag + ': provider data returned');
+  return { ms, w, e };
+};
+const healthyCtx = executionContext();
+const healthy = await timed('latency-ok', memoryBucket(new Map()), healthyCtx);
+await healthyCtx.drain();
+assert.equal((await diagnostics(healthy.w, healthy.e)).written, 2);
+let release;
+const held = new Promise((resolve) => (release = resolve));
+const heldDb = new Map(),
+  heldBucket = memoryBucket(heldDb, { holdArchive: held }),
+  heldCtx = executionContext();
+const blocked = await timed('latency-held', heldBucket, heldCtx);
+assert(heldBucket.stats.archiveAttempts >= 1, 'The archive write has started');
+assert.equal(archiveKeys(heldDb).length, 0, 'The response arrived before the put resolved');
+assert(heldCtx.tasks.length >= 1, 'The pending write is kept alive by waitUntil');
+assert(
+  blocked.ms < healthy.ms + 500 && blocked.ms < 1500,
+  'Blocked archive adds no latency: ' + Math.round(blocked.ms) + ' ms vs ' + Math.round(healthy.ms),
+);
+release();
+await heldCtx.drain();
+assert.equal(archiveKeys(heldDb).length, 2, 'The write completes after the response');
+assert.equal((await diagnostics(blocked.w, blocked.e)).written, 2);
+// Écriture qui ne répond jamais : réponse immédiate, puis délai compté par la tâche de fond.
+const stuckCtx = executionContext();
+const stuck = await timed(
+  'latency-stuck',
+  memoryBucket(new Map(), { hangArchive: true }),
+  stuckCtx,
+);
+assert(stuck.ms < 1500, 'A stuck put never delays the response');
+assert.equal((await diagnostics(stuck.w, stuck.e)).timeouts, 0);
+await stuckCtx.drain();
+const stuckMetrics = await diagnostics(stuck.w, stuck.e);
+assert.equal(stuckMetrics.timeouts, 1);
+assert(Number.isFinite(Date.parse(stuckMetrics.lastFailureAt)));
+// Sans contexte d'exécution (Node, tests) : promesse détachée, aucune attente ni rejet perdu.
+const detached = await timed('latency-detached', memoryBucket(new Map(), { failArchive: true }));
+assert(detached.ms < 1500);
+await new Promise((resolve) => setTimeout(resolve, 20));
+assert.equal((await diagnostics(detached.w, detached.e)).failures, 2);
+console.log(
+  'Latency with archive put healthy / blocked / stuck: ' +
+    [healthy, blocked, stuck].map((x) => Math.round(x.ms) + ' ms').join(' / '),
+);
+
+// 9. Identité de dédoublonnage = (fixtureId, update) : coup d'envoi présent, puis absent, puis
+// déplacé, chaque fois dans un nouvel isolat (ensemble mémoire vide) → une seule écriture.
+const book = {
+  id: 1,
+  name: 'Book',
+  bets: [{ name: 'Match Winner', values: [{ value: 'Home', odd: '2.10' }] }],
+};
+const replayRow = {
+  fixture: { id: 7, date: '2026-10-15T22:00:00Z' },
+  update: '2026-10-14T15:00:00Z',
+  bookmakers: [book],
+};
+const dedupDb = new Map(),
+  dedupEnv = { BUCKET: memoryBucket(dedupDb) };
+const variants = [
+  replayRow,
+  { ...replayRow, fixture: { id: 7 } },
+  { ...replayRow, fixture: { id: 7, date: '2026-10-16T01:00:00Z' } },
+];
+for (const [i, row] of variants.entries()) {
+  resetArchiveMetrics();
+  await archiveOdds(dedupEnv, 'odds?fixture=7', { response: [row] });
+  assert.equal(archiveMetrics().written, i ? 0 : 1);
+  assert.equal(archiveMetrics().duplicates, i ? 1 : 0);
+}
+assert.deepEqual(archiveKeys(dedupDb), ['odds-archive/2026-10-14/7/20261014T150000000Z.json']);
+assert.equal(dedupEnv.BUCKET.stats.archiveAttempts, 3, 'Each replay reaches the conditional put');
+
+// 10. Aucune exception ne sort de l'archive. Reproduction du relecteur : `fixture.date` objet.
+console.warn = (...args) => warnings.push(args.join(' '));
+warnings.length = 0;
+datePage = JSON.parse(
+  JSON.stringify([
+    {
+      fixture: { id: 3, date: { toString: null } },
+      league: { id: { toString: null }, name: { toString: null }, season: '2026' },
+      update: T1,
+      bookmakers: [
+        {
+          id: { toString: null },
+          name: 'Book',
+          bets: [
+            { name: { toString: null }, values: [] },
+            {
+              name: 'Match Winner',
+              values: [
+                { value: { toString: null }, odd: '2.00' },
+                { value: 'Home', odd: { toString: null } },
+                { value: 'Away', odd: '3.10' },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    { fixture: { id: { toString: null } }, update: T1, bookmakers: [book] },
+    quote(2),
+  ]),
+);
+const badDb = new Map(),
+  badEnv = { BUCKET: memoryBucket(badDb), API_FOOTBALL_KEY: secret },
+  badCtx = executionContext();
+const w10 = await isolate('malformed');
+const badResponse = await w10.fetch(new Request(oddsPage), badEnv, badCtx);
+assert.equal(badResponse.status, 200, 'A malformed row never breaks the provider response');
+assert.deepEqual((await badResponse.json()).response, datePage);
+await badCtx.drain();
+const salvagedKey = 'odds-archive/' + fixedDay(T1) + '/3/' + compact(T1) + '.json';
+assert.deepEqual(
+  archiveKeys(badDb),
+  [salvagedKey, 'odds-archive/' + fixedDay(T2) + '/2/' + compact(T2) + '.json'].sort(),
+);
+const salvaged = JSON.parse(badDb.get(salvagedKey));
+assert.equal(salvaged.kickoff, null, 'An unreadable kickoff is left empty, never invented');
+assert.deepEqual(salvaged.league, { id: null, name: null, country: null, season: 2026 });
+assert.deepEqual(salvaged.bookmakers, [
+  {
+    id: null,
+    name: 'Book',
+    markets: [{ name: 'Match Winner', values: [{ value: 'Away', odd: '3.10' }] }],
+  },
+]);
+const badMetrics = await diagnostics(w10, badEnv);
+assert.equal(badMetrics.written, 2);
+assert.equal(badMetrics.skipped, 1);
+datePage = null;
+// Une ligne qui lève pendant la construction est écartée seule, journalisée sans valeur.
+const trapDb = new Map(),
+  trapEnv = { BUCKET: memoryBucket(trapDb) };
+const trap = {
+  fixture: { id: 8 },
+  update: T1,
+  get bookmakers() {
+    throw new TypeError('trap-value-' + secret);
+  },
+};
+resetArchiveMetrics();
+await archiveOdds(trapEnv, 'odds?fixture=8', { response: [trap, quote(2)] });
+assert.equal(archiveMetrics().rejected, 1);
+assert.equal(archiveMetrics().written, 1, 'Valid rows are still archived');
+assert.deepEqual(archiveKeys(trapDb), [
+  'odds-archive/' + fixedDay(T2) + '/2/' + compact(T2) + '.json',
+]);
+const hostile = {
+  get response() {
+    throw new Error('hostile-' + secret);
+  },
+};
+await archiveOdds(trapEnv, 'odds?fixture=8', hostile);
+await archiveOdds(null, 'odds?fixture=8', { response: [quote(2)] });
+assert.equal(archiveMetrics().failures, 1);
+console.warn = warn;
+assert(warnings.length >= 2, 'Rejected rows are logged');
+for (const line of warnings)
+  assert(!line.includes(secret) && !line.includes('trap-value') && !line.includes('hostile'));
+
+// 11. Plafond en octets, cas du relecteur : 40 bookmakers × 4 marchés × 40 valeurs multioctets.
+// Le nombre de bookmakers reste dans la borne (40) : seule la réduction en octets agit.
+const heavyRow = {
+  fixture: { id: 7, date: '2026-10-15T22:00:00Z' },
+  update: '2026-10-14T15:00:00Z',
+  bookmakers: Array.from({ length: 40 }, (_, i) => ({
+    id: i + 1,
+    name: 'Book ' + i,
+    bets: ['Match Winner', 'Double Chance', 'Goals Over/Under', 'Both Teams Score'].map((name) => ({
+      name,
+      values: Array.from({ length: 40 }, () => ({ value: 'é'.repeat(40), odd: '999999.9999' })),
+    })),
+  })),
+};
+const heavy = archiveRecord(heavyRow, 'odds?fixture=7');
+const heavyBytes = Buffer.byteLength(heavy.body);
+const heavyRecord = JSON.parse(heavy.body);
+assert(heavyBytes <= ARCHIVE_MAX_BYTES, 'Byte cap holds: ' + heavyBytes);
+assert(
+  Buffer.byteLength(JSON.stringify(heavyRecord.bookmakers[0])) * 2 > ARCHIVE_MAX_BYTES,
+  'The case really exceeds the byte cap with two bookmakers',
+);
+assert.equal(heavyRecord.truncated, true);
+assert.equal(heavyRecord.bookmakers.length, 1);
+assert.equal(heavyRecord.droppedBookmakers, 39);
+assert.equal(heavyRecord.bookmakers[0].markets.length, 4);
+assert(heavyRecord.bookmakers[0].markets.every((m) => m.values.length === 40));
+assert.equal(heavy.truncated, true);
+assert.equal(unhandled.length, 0, 'No archive promise is ever left rejected');
+
 console.log(
   'Passed: odds archive — 2 snapshots give 2 objects, identical replay and cache hits add none, same request count (' +
     baselineRequests +
-    ' per analysis), R2 failure and stuck write leave the ticket unchanged and are counted, size cap ' +
+    ' per analysis), R2 failure and stuck write leave the ticket unchanged and are counted, blocked put adds no latency (waitUntil), key depends only on (fixtureId, update), malformed rows isolated, byte cap ' +
     ARCHIVE_MAX_BYTES +
-    ' bytes, no invented data.',
+    ' bytes (' +
+    heavyBytes +
+    ' bytes, 39 of 40 bookmakers dropped), no invented data.',
 );
