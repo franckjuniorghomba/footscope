@@ -91,4 +91,52 @@ const undefinedKey = { payload, signature: await hmac(await hkdfKey('undefined')
 const unconfigured = await review(undefinedKey, {});
 assert.equal(unconfigured.status, 503);
 assert.match((await unconfigured.json()).error, /indisponible/);
+
+// La vérification passe par crypto.subtle.verify (temps constant) et non par une comparaison
+// de chaînes : on espionne verify le temps de ces cas, puis on restaure l'original.
+const subtle = globalThis.crypto.subtle;
+const originalVerify = subtle.verify;
+const calls = [];
+let forced;
+subtle.verify = async function (...args) {
+  calls.push(args);
+  const result = await originalVerify.apply(subtle, args);
+  return forced === undefined ? result : forced;
+};
+try {
+  // Jeton valide : exactement un appel, avec la clé HMAC dérivée, la signature et la charge utile.
+  assert.equal((await review(valid)).status, 200);
+  assert.equal(calls.length, 1, 'unseal doit appeler crypto.subtle.verify exactement une fois');
+  const [algorithm, key, mac, data] = calls[0];
+  assert.equal(typeof algorithm === 'string' ? algorithm : algorithm.name, 'HMAC');
+  assert.ok(key instanceof CryptoKey);
+  assert.equal(key.algorithm.name, 'HMAC');
+  assert.equal(key.algorithm.hash.name, 'SHA-256');
+  assert.equal(key.extractable, false);
+  assert.ok(key.usages.includes('verify'));
+  assert.equal(hex(mac), valid.signature);
+  assert.equal(new TextDecoder().decode(data), payload);
+  // La clé passée à verify est bien la clé HKDF : elle valide un MAC calculé par l'oracle du test
+  // et rejette l'ancien format signé avec la clé brute.
+  const oracle = await crypto.subtle.sign('HMAC', await hkdfKey('mock-key'), enc('oracle'));
+  assert.equal(await originalVerify.call(subtle, 'HMAC', key, oracle, enc('oracle')), true);
+  const raw = await crypto.subtle.sign('HMAC', await rawKey('mock-key'), enc('oracle'));
+  assert.equal(await originalVerify.call(subtle, 'HMAC', key, raw, enc('oracle')), false);
+
+  // Une charge utile altérée est refusée par verify, appelé une fois.
+  calls.length = 0;
+  await refused(
+    { ...valid, payload: valid.payload.replace('"matchId":7', '"matchId":8') },
+    /altérée/,
+  );
+  assert.equal(calls.length, 1);
+
+  // Le verdict de verify fait foi : forcé à false, un jeton valide est refusé.
+  calls.length = 0;
+  forced = false;
+  await refused(valid, /altérée/);
+  assert.equal(calls.length, 1);
+} finally {
+  subtle.verify = originalVerify;
+}
 console.log('Seal HKDF tests passed.');
