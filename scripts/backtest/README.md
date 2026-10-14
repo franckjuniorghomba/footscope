@@ -220,6 +220,50 @@ historique et de son plan avant de calculer. Ces fichiers restent hors Git. Une 
 terminée produit le même jeu et la même somme, sans appel supplémentaire. Une
 rencontre dupliquée, un statut FT sans score ou un périmètre incomplet sont des erreurs.
 
+## Sélection Dixon-Coles − m contre sélection actuelle (BIS-184)
+
+`selection.mjs` compose, sur les mêmes journées et avec le même `selectCouponDetailed`,
+deux tickets par journée : (A) la sélection actuelle, jambe si probabilité Poisson ≥ 0,7
+et historique récent, annoncé = probabilité prudente ; (B) jambe si probabilité
+Dixon-Coles ≥ 0,7 et historique récent, annoncé = max(0, p − m). Produit ≥ 0,5,
+un pari par match, quatre jambes au plus. A recomposée doit égaler le ticket du
+moteur, sinon la comparaison est refusée. Les lignes de prévision gagnent deux
+champs additifs, `recentHistory` et `kickoff`, et `runBacktest` accepte
+`dixonColesChosen` pour figer (ξ, ridge).
+
+La marge m suit une règle écrite avant tout calcul (`MARGIN_RULE`) : grille 0 à
+0,20 par pas de 0,01 ; plus petit m pour lequel, sur 2024/25, l'annoncé moyen des
+tickets B est ≤ au passage observé, au total et pour chaque taille d'au moins 30
+tickets. (ξ, ridge) sont ceux du run 2026/27, choisis sur 2025/26 avec l'historique
+seul. Trois étapes, dans cet ordre :
+
+```sh
+H=/root/.local/share/jarvis/livrables/footscope/BIS-167/api-football/dataset.json
+OUT=/root/.local/share/jarvis/livrables/footscope/BIS-184
+# 1. Gel sur 2024/25 (le fichier de paramètres est créé une seule fois, puis committé).
+node scripts/backtest/margin.mjs freeze --history "$H" --params scripts/backtest/margin-2026.json
+SHA=$(sha256sum scripts/backtest/margin-2026.json | cut -d' ' -f1)
+# 2. Contrôle 2025/26, saison déjà lue par BIS-167 et BIS-183.
+node scripts/backtest/margin.mjs control --history "$H" \
+  --params scripts/backtest/margin-2026.json --params-sha "$SHA" --out "$OUT"
+# 3. Lecture unique de 2026/27 : le témoin lecture-2026-27.json refuse toute relance.
+node scripts/backtest/margin.mjs evaluate --history "$H" \
+  --input /root/.local/share/jarvis/livrables/footscope/BIS-185/api-football-2026/dataset.json \
+  --params scripts/backtest/margin-2026.json --params-sha "$SHA" \
+  --control "$OUT/controle-2025-26.json" --out "$OUT"
+```
+
+Le gel a été fait le 2026-10-14 : **m = 0,03**, `margin-2026.json` SHA-256
+`9f912a82…`. Mesures : gel 44 s et 242 Mio de RSS, contrôle 10 s, évaluation
+7 s et 182 Mio. **La période 2026/27 a été lue par l'étape 3** ; toute nouvelle
+lecture, y compris par `run.mjs --history`, n'est plus un test intact.
+
+Le verdict par taille est mécanique : « annoncé fiable » si l'IC à 95 % de
+(observé − annoncé) contient 0 et |écart| < 5 points ; sinon « optimiste » ou
+« pessimiste » ; « non défini » sous deux tickets. L'IC est un bootstrap par
+ticket (un ticket par journée). Sous 30 tickets, il est peu fiable : avec quatre
+tickets tous gagnés, il est étroit à tort. Ce rapport ne dit rien du rendement.
+
 ## Interpréter les chiffres
 
 Les probabilités utilisent `assessMatch` et `eventProbability`, avec la même
@@ -282,6 +326,7 @@ npm ci
 node tests/backtest.mjs
 node tests/dixon-coles.mjs
 node tests/backtest-2026.mjs
+node tests/margin.mjs
 npm run check
 ```
 

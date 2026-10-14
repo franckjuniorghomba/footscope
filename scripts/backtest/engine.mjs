@@ -46,10 +46,11 @@ const product = (rows, key) => rows.reduce((p, r) => p * r[key], 1);
 const teamKey = (f, side) => `${f.league.id}:${f.teams[side].id}`;
 
 // `analysis` : jeu combiné dont run.mjs a vérifié les deux sommes (périmètre jusqu'à 40 couples).
+// `dixonColesChosen` (BIS-184) : (ξ, ridge) figés à l'avance, au lieu du choix sur le développement.
 export function runBacktest(
   dataset,
   plan = dataset.plan || defaultPlan,
-  { analysis = false } = {},
+  { analysis = false, dixonColesChosen = null } = {},
 ) {
   validateDataset(dataset);
   if (
@@ -84,7 +85,9 @@ export function runBacktest(
   const histories = new Map(),
     naiveCounts = new Map();
   // BIS-183 : (ξ, ridge) figés sur la saison de développement avant toute lecture du test.
-  const dixonColesSelection = selectDixonColes(fixtures, plan);
+  const dixonColesSelection = dixonColesChosen
+    ? { chosen: { xi: dixonColesChosen.xi, ridge: dixonColesChosen.ridge }, grid: [], frozen: true }
+    : selectDixonColes(fixtures, plan);
   const dixonColes = createDixonColes(dixonColesSelection.chosen);
   const phases = { development: [], test: [] };
   const coverage = {
@@ -190,6 +193,9 @@ export function runBacktest(
             naiveProbability,
             dixonColesProbability: dc.probability(market, selection),
             won: Number(settledOutcome(event, f)),
+            // BIS-184 : la sélection Dixon-Coles réapplique la même règle de fraîcheur.
+            recentHistory: recent,
+            kickoff: f.fixture.date,
             researchCandidate: recent && probability >= POLICY.minProbability,
             modelValidated: false,
             realMoneyEligible: false,
@@ -333,6 +339,7 @@ export function runBacktest(
       lowHistoryMatches: LOW_HISTORY_MATCHES,
       rhoBound: RHO_BOUND,
       chosen: dixonColesSelection.chosen,
+      frozen: Boolean(dixonColesSelection.frozen),
       developmentGrid: dixonColesSelection.grid,
       stats: dixonColes.stats,
     },
