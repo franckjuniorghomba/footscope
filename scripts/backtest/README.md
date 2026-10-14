@@ -130,11 +130,43 @@ populations différentes. Le rendement et la comparaison au marché sans marge
 sont reportés. football-data.co.uk est exclu et aucune source alternative n'est
 actuellement autorisée. `modelValidated` et `realMoneyEligible` restent faux.
 
+## Modèle Dixon-Coles (BIS-183, banc uniquement)
+
+`dixon-coles.mjs` ajoute une colonne `dixon-coles` à tous les tableaux, sans rien
+changer en production (`statistics.js`, `policy.js` et le Worker sont intacts).
+Par ligue : intercept, avantage du terrain, attaque et défense par équipe, avec
+Σattaques = Σdéfenses = 0, et correction ρ des seuls scores 0-0, 1-0, 0-1, 1-1
+(|ρ| ≤ 0,2). Maximum de vraisemblance pondéré par `exp(−ξ × âge en jours)`,
+L-BFGS déterministe, départ à chaud depuis l'ajustement précédent de la ligue.
+
+- **Anti-fuite** : réajustement au plus une fois par ligue et par journée GMT−5,
+  avec les seuls matchs FT des journées strictement antérieures ; prédire après
+  avoir appris le jour même lève une erreur.
+- **Rétrécissement** : pénalité ridge `½ × ridge × Σ(attaque² + défense²)`, prior
+  centré sur la moyenne de la ligue. Une équipe promue reste près de la moyenne
+  jusqu'à ce que ses matchs l'en écartent ; les prédictions avec une équipe sous
+  19 matchs de ligue sont comptées. Une rencontre sans prédiction Dixon-Coles est
+  exclue pour tous les modèles, avec son motif (`dixon_coles_*`).
+- **Choix de ξ et ridge** : grille fixe ξ ∈ {0 ; 0,001 ; 0,002 ; 0,004} × ridge ∈
+  {1 ; 4 ; 16}, critère = moyenne des Brier 1X2, Plus/moins 2,5 et BTTS sur la
+  saison de développement. Seules les rencontres antérieures à `testStart` sont
+  transmises au choix ; la saison test est lue une fois avec les paramètres figés.
+- **Verdict** par marché : « meilleur » si la différence de Brier Dixon-Coles −
+  Poisson est négative et que son IC apparié à 95 % (bootstrap par journée) exclut
+  0, « pire » symétriquement, sinon « indistinct ». ECE = écart pondéré des classes
+  de calibration de 0,1. Dixon-Coles est évalué sur les jambes choisies par le
+  sélecteur Poisson ; il ne compose pas ses propres tickets.
+
+Durée mesurée sur le jeu historique BIS-167 (9 824 rencontres, 12 points de grille
+puis passe finale) : environ 45 s et 380 Mio de RSS. Un verdict « meilleur » ne
+valide pas le modèle : sa mise en production reste une décision du responsable.
+
 ## Validation et retour arrière
 
 ```sh
 npm ci
 node tests/backtest.mjs
+node tests/dixon-coles.mjs
 npm run check
 ```
 

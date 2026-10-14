@@ -24,6 +24,11 @@ export function scores(rows, field) {
         (r) => -(r.won * Math.log(clamp(r[field])) + (1 - r.won) * Math.log(1 - clamp(r[field]))),
       ),
     ),
+    // Écart de calibration moyen pondéré par l'effectif des classes (ECE).
+    ece: rows.length
+      ? bins.reduce((sum, b) => sum + (b.count ? Math.abs(b.predictions - b.wins) : 0), 0) /
+        rows.length
+      : null,
     calibration: bins.map((b) => ({
       lower: b.lower,
       upper: b.upper,
@@ -42,14 +47,17 @@ export function ticketSummary(rows) {
     announced: mean(rows.map((r) => r.prudentProbability)),
     exploratory: mean(rows.map((r) => r.probability)),
     naive: mean(rows.map((r) => r.naiveProbability)),
+    dixonColes: mean(rows.map((r) => r.dixonColesProbability)),
     gap: mean(rows.map((r) => r.won - r.prudentProbability)),
     naiveGap: mean(rows.map((r) => r.won - r.naiveProbability)),
+    dixonColesGap: mean(rows.map((r) => r.won - r.dixonColesProbability)),
     bySize: Object.fromEntries(
       [1, 2, 3, 4].map((k) => [k, rows.filter((r) => r.selections.length === k).length]),
     ),
     poissonScores: scores(rows, 'probability'),
     prudentScores: scores(rows, 'prudentProbability'),
     naiveScores: scores(rows, 'naiveProbability'),
+    dixonColesScores: scores(rows, 'dixonColesProbability'),
   };
 }
 
@@ -102,7 +110,12 @@ export function scoreIntervals(days, market, scope, replicates, seed) {
       (r) => r.market === market,
     );
     const result = { count: rows.length };
-    for (const field of ['probability', 'prudentProbability', 'naiveProbability']) {
+    for (const field of [
+      'probability',
+      'prudentProbability',
+      'naiveProbability',
+      'dixonColesProbability',
+    ]) {
       const s = scores(rows, field);
       result[field] = {
         brier: (s.brier || 0) * rows.length,
@@ -120,6 +133,7 @@ export function scoreIntervals(days, market, scope, replicates, seed) {
         ['poisson', 'probability'],
         ['prudent', 'prudentProbability'],
         ['naive', 'naiveProbability'],
+        ['dixonColes', 'dixonColesProbability'],
       ]) {
         for (const metric of ['brier', 'logLoss'])
           result[`${label}_${metric}`] = n
@@ -128,6 +142,11 @@ export function scoreIntervals(days, market, scope, replicates, seed) {
       }
       result.brierDifference = n ? result.poisson_brier - result.naive_brier : null;
       result.logLossDifference = n ? result.poisson_logLoss - result.naive_logLoss : null;
+      // Différences appariées Dixon-Coles − Poisson : négatif favorise Dixon-Coles.
+      result.dixonColesBrierDifference = n ? result.dixonColes_brier - result.poisson_brier : null;
+      result.dixonColesLogLossDifference = n
+        ? result.dixonColes_logLoss - result.poisson_logLoss
+        : null;
       return result;
     },
     replicates,
