@@ -111,7 +111,7 @@ export function assessMatch(d, now = Date.now()) {
           const reasons = [...common],
             age = now - Date.parse(record.update);
           if (!Number.isFinite(age) || age < -300000 || age > POLICY.maxOddsAgeMs)
-            reasons.push('Cote absente, future ou âgée de plus de 30 minutes.');
+            reasons.push('Cote absente, future ou âgée de plus de 3 heures.');
           if (p === null) reasons.push('Marché non modélisé : aucune validation automatique.');
           const edge = prudent === null ? null : prudent * odd - 1;
           if (p !== null && p < POLICY.minProbability)

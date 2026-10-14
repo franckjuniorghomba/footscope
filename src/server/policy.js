@@ -2,7 +2,9 @@ export const POLICY = {
   minHistory: 8,
   minProbability: 0.7,
   minPrudentEdge: 0.02,
-  maxOddsAgeMs: 1800000,
+  maxOddsAgeMs: 3 * 60 * 60000,
+  // Comparaison descriptive BIS-200 : deux relevés récents, même si admissibles à 3 h.
+  maxMarketOddsAgeMs: 30 * 60000,
   maxRecentAgeDays: 45,
   maxSelections: 4,
   // Probabilité prudente combinée minimale d'un ticket (produit des sélections).
