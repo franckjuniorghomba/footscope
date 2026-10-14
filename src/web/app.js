@@ -707,8 +707,10 @@ function renderCoupon() {
     coupon.every((x, i) => x === ticketCopy.items[i]);
   $('#couponProbability').textContent = !intactCopy
     ? 'Coupon manuel : Footscope ne calcule pas sa probabilité, car la dépendance entre les matchs et la calibration restent à valider. Les cotes peuvent changer.'
-    : ticketCopy.probability
-      ? 'Copie intacte du ticket du jour : sa probabilité, estimée par le serveur pour ces sélections au moment de l’analyse, reste affichée dans le ticket. Elle est exploratoire et non calibrée. Si vous modifiez ce coupon, il devient manuel et aucune probabilité n’est calculée.'
+    : ticketCopy.probability !== null
+      ? 'Copie intacte du ticket du jour. Probabilité estimée par le serveur pour ces sélections au moment de l’analyse : ' +
+        (ticketCopy.probability * 100).toFixed(1) +
+        ' %, exploratoire et non calibrée. Si vous modifiez ce coupon, il devient manuel et aucune probabilité n’est calculée.'
       : 'Copie intacte du ticket du jour : le serveur n’a pas fourni de probabilité pour ce ticket, et Footscope n’en calcule pas ici. Les cotes peuvent changer.';
   const stake = Number($('#stake').value);
   $('#return').textContent =
@@ -1034,7 +1036,12 @@ function showAssistant(d) {
     $('#useProposal').onclick = () => {
       if (coupon.length && !confirm('Remplacer le coupon actuel ?')) return;
       coupon = d.selections.slice(0, 4);
-      ticketCopy = { items: coupon.slice(), probability: Number.isFinite(d.ticketProbability) };
+      // Valeur fournie par le serveur, reprise telle quelle dans la note du coupon : elle
+      // reste visible même quand « Examiner mon coupon » remplace le ticket affiché.
+      ticketCopy = {
+        items: coupon.slice(),
+        probability: Number.isFinite(d.ticketProbability) ? d.ticketProbability : null,
+      };
       renderCoupon();
       toast('Ticket du jour copié dans votre coupon.');
     };
