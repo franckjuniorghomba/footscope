@@ -1,4 +1,4 @@
-import { api, fixturesForDay } from './provider.js';
+import { api, cacheMetrics, fixturesForDay } from './provider.js';
 import { POLICY } from './policy.js';
 import { json } from './http.js';
 import { assistant } from './assistant.js';
@@ -22,7 +22,7 @@ export default {
       }
       if (u.pathname === '/api/diagnostics') {
         const obj = env.BUCKET ? await env.BUCKET.get('api-control/last-limit.json') : null;
-        return json({ lastLimit: obj ? await obj.json() : null });
+        return json({ lastLimit: obj ? await obj.json() : null, cache: cacheMetrics() });
       }
       if (u.pathname === '/api/performance') return json(await performance(env));
       if (u.pathname === '/api/assistant/latest') {
