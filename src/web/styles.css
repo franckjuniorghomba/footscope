@@ -1555,3 +1555,12 @@ footer.site {
     flex-direction: column;
   }
 }
+
+.oddsage {
+  display: block;
+  color: var(--ink-subtle);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

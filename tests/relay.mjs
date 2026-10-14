@@ -20,6 +20,10 @@ await once(server, 'listening');
 const base = 'http://127.0.0.1:' + server.address().port;
 const headers = { 'x-relay-token': token, 'x-apisports-key': 'mock-key' };
 try {
+  const health = await fetch(base + '/health');
+  assert.equal(health.status, 200);
+  assert.deepEqual(await health.json(), { ready: true });
+  assert.equal(calls.length, 0, 'Health checks do not consume provider quota');
   assert.equal((await fetch(base + '/status')).status, 401);
   assert.equal((await fetch(base + '/status', { headers, method: 'POST' })).status, 405);
   assert.equal((await fetch(base + '/players', { headers })).status, 404);

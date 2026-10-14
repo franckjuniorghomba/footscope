@@ -87,7 +87,7 @@ function moveFocus(el) {
 }
 function fresh(s) {
   const age = Date.now() - Date.parse(s);
-  return Number.isFinite(age) && age >= -300000 && age <= 30 * 60000;
+  return Number.isFinite(age) && age >= -300000 && age <= 3 * 60 * 60000;
 }
 async function get(path) {
   const r = await fetch(path, { credentials: 'same-origin' });
@@ -630,6 +630,7 @@ function renderMarkets() {
   $('#marketTable').innerHTML =
     '<p class="note">Mise à jour du fournisseur : ' +
     stamp(updated) +
+    oddsAgeHTML(updated) +
     (available ? '' : ' · Ajout bloqué : cote ancienne, horaire passé ou match déjà commencé.') +
     '</p><table><thead><tr><th scope="col">Marché / sélection</th><th scope="col">Cote</th><th scope="col">Seuil</th><th scope="col"><span class="visually-hidden">Ajouter au coupon</span></th></tr></thead><tbody>' +
     marketChoices
@@ -688,8 +689,8 @@ function renderCoupon() {
             esc(x.selection) +
             '<br><span class="note">' +
             esc(x.bookmaker) +
-            ' · cote du ' +
-            stamp(x.updated) +
+            ' · ' +
+            esc(oddsAge(x.updated)) +
             '</span></div><strong class="odd">' +
             x.odd.toFixed(2) +
             '</strong><button class="iconbtn" data-remove="' +
@@ -974,6 +975,20 @@ function valueFact(market) {
     '<small>bet365 contre cote juste Pinnacle · repère descriptif, pas une promesse de gain</small></dd></div>'
   );
 }
+// Âge fournisseur au moment du rendu ; aucune heure inventée si absente ou future.
+function oddsAge(updated, now = Date.now()) {
+  const age = typeof updated === 'string' ? now - Date.parse(updated) : NaN;
+  if (!Number.isFinite(age)) return 'Âge de la cote indisponible';
+  if (age < 0) return 'Horodatage de la cote dans le futur';
+  const minutes = Math.floor(age / 60000);
+  return (
+    'cote mise à jour il y a ' +
+    (minutes < 60 ? minutes + ' min' : Math.floor(minutes / 60) + ' h ' + (minutes % 60) + ' min')
+  );
+}
+function oddsAgeHTML(updated) {
+  return '<span class="oddsage">' + esc(oddsAge(updated)) + '</span>';
+}
 function eventHTML(x, market, role, index) {
   return (
     '<div class="eventitem"><b>' +
@@ -984,6 +999,7 @@ function eventHTML(x, market, role, index) {
     esc(x.selection) +
     ' @ ' +
     Number(x.odd).toFixed(2) +
+    oddsAgeHTML(x.updated) +
     '<br><span class="tag ' +
     (x.status === 'simulation_eligible' ? 'ok' : '') +
     '">' +
@@ -1027,7 +1043,9 @@ function pickHTML(x, market, index) {
     esc(x.selection) +
     ' · ' +
     kickoff(x.kickoff) +
-    '</span></div><span class="odd"><span class="visually-hidden">Cote </span>' +
+    '</span>' +
+    oddsAgeHTML(x.updated) +
+    '</div><span class="odd"><span class="visually-hidden">Cote </span>' +
     Number(x.odd).toFixed(2) +
     '</span>' +
     valueBadge(valueCheck(market, 'selection', index, x)) +
@@ -1054,6 +1072,7 @@ function candidatesHTML(market) {
           esc(c.selection ?? '—') +
           (Number.isFinite(c.odd) ? ' @ ' + c.odd.toFixed(2) : '') +
           (c.bookmaker ? ' · ' + esc(c.bookmaker) : '') +
+          oddsAgeHTML(c.updated) +
           valueBadge(c) +
           '</div>',
       )

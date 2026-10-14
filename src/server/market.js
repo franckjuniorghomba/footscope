@@ -9,7 +9,7 @@ function parseOdd(raw) {
 }
 const fresh = (updated, now) => {
   const age = typeof updated === 'string' ? now - Date.parse(updated) : NaN;
-  return Number.isFinite(age) && age >= -300000 && age <= POLICY.maxOddsAgeMs;
+  return Number.isFinite(age) && age >= -300000 && age <= POLICY.maxMarketOddsAgeMs;
 };
 
 // Repère descriptif seulement : les trois issues doivent provenir du même
@@ -19,7 +19,7 @@ export function marketReference(records, now = Date.now()) {
   if (!Array.isArray(records) || !Number.isFinite(now)) return references;
   for (const record of records) {
     const age = typeof record?.update === 'string' ? now - Date.parse(record.update) : NaN;
-    if (!Number.isFinite(age) || age < -300000 || age > POLICY.maxOddsAgeMs) continue;
+    if (!Number.isFinite(age) || age < -300000 || age > POLICY.maxMarketOddsAgeMs) continue;
     if (!Array.isArray(record.bookmakers)) continue;
     for (const book of record.bookmakers) {
       if (typeof book?.name !== 'string' || !book.name.trim() || !Array.isArray(book.bets))
@@ -168,6 +168,7 @@ export function marketValue(event, reference, now = Date.now()) {
     selection: typeof event?.selection === 'string' ? event.selection : null,
     bookmaker: typeof event?.bookmaker === 'string' ? event.bookmaker : null,
     odd: Number.isFinite(event?.odd) ? event.odd : null,
+    updated: event?.missing !== true && typeof event?.updated === 'string' ? event.updated : null,
     referenceBookmaker: reference?.bookmaker ?? null,
     referenceUpdated: reference?.updated ?? null,
     fairProbability: null,

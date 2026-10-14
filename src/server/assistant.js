@@ -313,6 +313,8 @@ export async function assistant(req, env, path) {
         });
         reviews.push({
           ...x,
+          // Aucun horodatage client présenté comme une mise à jour fournisseur.
+          updated: null,
           status: 'insufficient',
           realMoneyEligible: false,
           reasons: ['Événement absent de la réponse actuelle du fournisseur.'],
