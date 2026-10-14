@@ -2,6 +2,8 @@
 // (probabilités combinées, motif d'absence) dans la réponse API et dans l'entrée du LLM.
 // Tout le réseau est simulé : aucun secret ni appel payant.
 import assert from 'node:assert/strict';
+import { finishEvidence } from '../src/server/jobs.js';
+import { EVIDENCE_LIMITS } from '../src/server/evidence.js';
 import { assistant } from '../src/server/assistant.js';
 import { BELOW_THRESHOLD_REASON, NO_CANDIDATE_REASON } from '../src/server/coupon.js';
 import { POLICY, MODEL_VERSION } from '../src/server/policy.js';
@@ -44,6 +46,7 @@ const bucket = {
   get: async (k) => (db.has(k) ? { json: async () => JSON.parse(db.get(k)) } : null),
   put: async (k, v) => {
     db.set(k, v);
+    return {};
   },
 };
 let llmCalls = [];
@@ -87,17 +90,33 @@ async function propose(reports, env = llmEnv, headers = {}) {
     finalChecked: Object.fromEntries(reports.map((r) => [r.matchId, now])),
   };
   db.set('jobs/' + id + '/manifest.json', JSON.stringify(job));
-  for (const r of reports)
-    db.set('jobs/' + id + '/reports/' + r.matchId + '.json', JSON.stringify(r));
-  return assistant(
-    new Request('https://site/api/assistant/propose', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ jobId: id }),
-    }),
-    env,
-    '/api/assistant/propose',
-  );
+  for (const r of reports) {
+    const snapshotId = String(r.matchId).padStart(64, '0');
+    const prefix = 'jobs/' + id + '/evidence/';
+    db.set(prefix + 'original/' + r.matchId + '.json', JSON.stringify({ snapshotId }));
+    db.set(
+      prefix + 'snapshots/' + snapshotId + '.json',
+      JSON.stringify({
+        report: r,
+        policy: POLICY,
+        evaluatedAt: timestamp(),
+        sources: {},
+        screeningReasons: [],
+        quoteSummary: [],
+      }),
+    );
+    db.set(
+      'jobs/' + id + '/reports/' + r.matchId + '.json',
+      JSON.stringify({ ...r, evidenceSnapshotId: snapshotId }),
+    );
+  }
+  const req = new Request('https://site/api/assistant/propose', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ jobId: id }),
+  });
+  const response = await assistant(req, env, '/api/assistant/propose');
+  return finishEvidence(req, env, response);
 }
 async function proposed(reports, env) {
   const response = await propose(reports, env);
@@ -149,7 +168,9 @@ for (const e of strongInput.excludedCandidates) {
   assert(e.ticketProbabilityIfAdded < 0.5);
   assert.equal(e.reason, 'TICKET_PROBABILITY_BELOW_THRESHOLD');
 }
-assert.match(LLM_INSTRUCTIONS, /minTicketProbability \(0,5/);
+assert.match(LLM_INSTRUCTIONS, /minTicketProbability reçu dans les données/);
+assert(!LLM_INSTRUCTIONS.includes('0,5'));
+assert.match(LLM_INSTRUCTIONS, /sans ticket, elle est la probabilité seule du candidat/);
 assert(!LLM_INSTRUCTIONS.includes('Au plus quatre sélections, pas de coupon obligatoire.'));
 assert.match(LLM_INSTRUCTIONS, /n’invente aucun chiffre/);
 // La réponse enregistrée porte les mêmes valeurs que la réponse API.
@@ -277,6 +298,77 @@ assert.deepEqual(
   [1, 2, 3, 4],
   'Même entrée, même ticket',
 );
+
+// Grand univers : exclusions bornées, preuves exhaustives, plafonds UTF-8.
+const books = ['Book', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8'];
+for (const withTicket of [true, false]) {
+  const reports = Array.from({ length: 200 }, (_, i) =>
+    report(
+      i + 1,
+      books.map((bookmaker) => event(i + 1, withTicket && i === 0 ? 0.9 : 0.45, { bookmaker })),
+    ),
+  );
+  const body = await proposed(reports);
+  assert.equal(body.analyzed, 200);
+  assert.equal(body.coverageComplete, true);
+  assert.equal(body.selections.length, withTicket ? 1 : 0);
+  assert.equal(llmCalls.length, 1);
+  const input = llmCalls[0];
+  assert.equal(input.excludedCandidates.length, 5);
+  assert.equal(input.excludedCandidatesCount, withTicket ? 199 : 1600);
+  assert.deepEqual(input.excludedCandidates, body.excludedCandidates);
+  assert(Buffer.byteLength(JSON.stringify(input)) < 8 * 1024);
+  assert.deepEqual(
+    input.excludedCandidates.map((e) => [e.matchId, e.bookmaker]),
+    withTicket ? [2, 3, 4, 5, 6].map((id) => [id, 'Book']) : books.slice(1, 6).map((b) => [1, b]),
+  );
+  for (const e of input.excludedCandidates)
+    assert(close(e.ticketProbabilityIfAdded, (withTicket ? 0.9 : 1) * e.prudentProbability));
+  assert.equal(body.evidence.status, 'complete');
+  const metadata = [...db.entries()].find(([k]) => k.endsWith('/ticket.json'));
+  const pages = [...db.entries()].filter(([k]) => k.includes('/pages/'));
+  assert(metadata);
+  assert(Buffer.byteLength(metadata[1]) <= EVIDENCE_LIMITS.metadataBytes);
+  assert.deepEqual(JSON.parse(metadata[1]).llm.input, input);
+  const decisions = pages.flatMap(([, value]) => JSON.parse(value));
+  assert.equal(decisions.length, 200);
+  assert.equal(new Set(decisions.map((d) => d.matchId)).size, 200);
+  assert.equal(
+    decisions.reduce((n, d) => n + d.events.length, 0),
+    1600,
+  );
+  assert(
+    Buffer.byteLength(metadata[1]) +
+      pages.reduce((n, [, v]) => n + Buffer.byteLength(v), 0) +
+      1024 <=
+      EVIDENCE_LIMITS.proposalBytes,
+  );
+  console.log(
+    JSON.stringify({
+      withTicket,
+      exclusions: body.excludedCandidates.length,
+      count: body.excludedCandidatesCount,
+      inputBytes: Buffer.byteLength(JSON.stringify(llmCalls[0])),
+      evidence: body.evidence,
+      metadataBytes: metadata ? Buffer.byteLength(metadata[1]) : null,
+      dossierBytes: metadata
+        ? Buffer.byteLength(metadata[1]) + pages.reduce((n, [, v]) => n + Buffer.byteLength(v), 0)
+        : null,
+    }),
+  );
+}
+
+// Le classement privilégie la probabilité, puis l’identité ; aucun effet de collecte.
+const rankedReports = universe([0.3, 0.48, 0.45, 0.48, 0.4, 0.47, 0.46]);
+const ranked = await proposed(rankedReports);
+assert.equal(ranked.excludedCandidatesCount, 7);
+assert.deepEqual(
+  ranked.excludedCandidates.map((e) => e.matchId),
+  [2, 4, 6, 7, 3],
+);
+const reversed = await proposed([...rankedReports].reverse());
+assert.deepEqual(reversed.excludedCandidates, ranked.excludedCandidates);
+assert.equal(reversed.excludedCandidatesCount, 7);
 
 // Revue d'un ticket existant : pas de composition, donc pas de métadonnées de ticket.
 db.clear();

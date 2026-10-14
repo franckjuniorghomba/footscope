@@ -95,9 +95,22 @@ function thresholdExcludedCandidates(reports, ticket, now) {
         candidates.set(key, e);
     }
   }
-  return [...candidates.values()]
+  const excluded = [...candidates.values()]
     .filter((e) => combined * e.prudentProbability < POLICY.minTicketProbability)
-    .map((e) => ({
+    // Départage indépendant de l’ordre de collecte : match numérique croissant,
+    // puis bookmaker canonique en ordre lexicographique (sans locale).
+    .sort((a, b) => {
+      const left = bookKey(a.bookmaker),
+        right = bookKey(b.bookmaker);
+      return (
+        b.prudentProbability - a.prudentProbability ||
+        a.matchId - b.matchId ||
+        (left < right ? -1 : left > right ? 1 : 0)
+      );
+    });
+  return {
+    count: excluded.length,
+    candidates: excluded.slice(0, 5).map((e) => ({
       matchId: e.matchId,
       match: e.match,
       bookmaker: e.bookmaker,
@@ -107,7 +120,8 @@ function thresholdExcludedCandidates(reports, ticket, now) {
       prudentProbability: e.prudentProbability,
       ticketProbabilityIfAdded: combined * e.prudentProbability,
       reason: 'TICKET_PROBABILITY_BELOW_THRESHOLD',
-    }));
+    })),
+  };
 }
 
 export async function assistant(req, env, path) {
@@ -231,7 +245,8 @@ export async function assistant(req, env, path) {
     reviews = [],
     blockers = [],
     ticket = null,
-    excludedCandidates = [];
+    excludedCandidates = [],
+    excludedCandidatesCount = 0;
   const scope = preparedJob?.scope || body.scope || {};
   if (proposing) {
     const allowed = reports.filter(
@@ -265,7 +280,9 @@ export async function assistant(req, env, path) {
     }
     const now = Date.now();
     ticket = selectCouponDetailed(allowed, now);
-    excludedCandidates = thresholdExcludedCandidates(allowed, ticket, now);
+    const excluded = thresholdExcludedCandidates(allowed, ticket, now);
+    excludedCandidates = excluded.candidates;
+    excludedCandidatesCount = excluded.count;
     selections = ticket.selections;
   } else {
     if (!Array.isArray(body.selections) || body.selections.length < 1 || body.selections.length > 4)
@@ -335,6 +352,7 @@ export async function assistant(req, env, path) {
     ticketProbabilityExploratory: ticket?.ticketProbabilityExploratory ?? null,
     minTicketProbability: POLICY.minTicketProbability,
     excludedCandidates,
+    excludedCandidatesCount,
     noTicketReason: ticket?.noTicketReason ?? null,
     risks: [
       'Modèle non validé hors échantillon.',
