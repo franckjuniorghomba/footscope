@@ -17,6 +17,7 @@ import {
   compactReport,
   blockedReport,
   selectCoupon,
+  BELOW_THRESHOLD_REASON,
 } from './coupon.js';
 
 const proposals = new WeakMap();
@@ -102,7 +103,11 @@ async function persistEvidence(env, context, result, proposalId) {
     'La dépendance entre matchs n’est pas modélisée.',
   ];
   if (result.ticketProbability !== undefined) llmInput.ticketProbability = result.ticketProbability;
-  const requested = result.selections.length > 0 && !!(env.OPENAI_API_KEY && env.LLM_MODEL);
+  const requested =
+    (result.selections.length > 0 ||
+      result.reviews.length > 0 ||
+      result.noTicketReason === BELOW_THRESHOLD_REASON) &&
+    !!(env.OPENAI_API_KEY && env.LLM_MODEL);
   const metadata = redactEvidence(env, {
     schemaVersion: 2,
     status: 'complete',
@@ -128,6 +133,10 @@ async function persistEvidence(env, context, result, proposalId) {
       ...(result.ticketProbability !== undefined
         ? { ticketProbability: result.ticketProbability }
         : {}),
+      ...(result.ticketProbabilityExploratory !== undefined
+        ? { ticketProbabilityExploratory: result.ticketProbabilityExploratory }
+        : {}),
+      ...(result.noTicketReason !== undefined ? { noTicketReason: result.noTicketReason } : {}),
       rules: {
         singleBookmaker: true,
         oneSelectionPerMatch: true,

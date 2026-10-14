@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { BELOW_THRESHOLD_REASON } from '../src/server/coupon.js';
 import {
   EVIDENCE_LIMITS,
   boundedEvidence,
@@ -331,6 +332,11 @@ do {
 assert.equal(proposed.selections.length, 4);
 const ticketDossier = await successful(await get('jobId=' + jobId));
 assert.deepEqual(ticketDossier.ticket.selections, proposed.selections);
+assert.equal(ticketDossier.ticket.noTicketReason, proposed.noTicketReason);
+assert.equal(
+  ticketDossier.ticket.ticketProbabilityExploratory,
+  proposed.ticketProbabilityExploratory,
+);
 assert.equal(ticketDossier.ticket.rules.maxSelections, 4);
 assert.equal(ticketDossier.modelValidated, false);
 assert.equal(ticketDossier.realMoneyEligible, false);
@@ -385,6 +391,72 @@ assert.equal(
   db.get('jobs/' + jobId + '/evidence/snapshots/' + checked.originalSnapshotId + '.json'),
   originalBytes,
 );
+// Le seuil est simulé uniquement dans une copie du bundle : ces candidats réels
+// de la fixture ne passent plus, sans modifier POLICY ni leurs preuves.
+const thresholdSource = source.replace(
+  /minTicketProbability:\s*0\.5\b/,
+  'minTicketProbability: 0.99',
+);
+assert.notEqual(thresholdSource, source, 'Simulated threshold was applied');
+const thresholdWorker = (
+  await import('data:text/javascript;base64,' + Buffer.from(thresholdSource).toString('base64'))
+).default;
+const thresholdReason = BELOW_THRESHOLD_REASON.replace('50 %', '99 %');
+const proposeBelowThreshold = async (configured = true) =>
+  successful(
+    await thresholdWorker.fetch(
+      new Request('https://site/api/assistant/propose', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'oai-authenticated-user-id': 'owner-sentinel',
+        },
+        body: JSON.stringify({ jobId }),
+      }),
+      configured ? env : { ...env, OPENAI_API_KEY: undefined },
+    ),
+  );
+llmRequest = null;
+const belowThreshold = await proposeBelowThreshold();
+assert.deepEqual(belowThreshold.selections, []);
+assert.equal(belowThreshold.noTicketReason, thresholdReason);
+assert.equal(belowThreshold.engine, 'llm');
+assert(llmRequest, 'The LLM explains the below-threshold refusal');
+const callsBeforeThresholdExport = calls;
+const writesBeforeThresholdExport = writes;
+const belowDossier = await successful(
+  await get('jobId=' + jobId + '&proposalId=' + belowThreshold.evidence.proposalId),
+);
+assert.equal(belowDossier.llm.requested, true);
+assert.equal(belowDossier.llm.outcome, 'llm');
+assert.equal(belowDossier.llm.model, llmRequest.model);
+assert.equal(belowDossier.llm.instructions, llmRequest.instructions);
+assert.deepEqual(belowDossier.llm.parameters, {
+  store: llmRequest.store,
+  max_output_tokens: llmRequest.max_output_tokens,
+  text: llmRequest.text,
+});
+assert.deepEqual(
+  belowDossier.llm.input,
+  JSON.parse(llmRequest.input.split('\n').slice(1).join('\n')),
+  'Below-threshold semantic input equals actual OpenAI request',
+);
+assert.equal(belowDossier.ticket.noTicketReason, thresholdReason);
+assert.equal(belowDossier.ticket.ticketProbabilityExploratory, null);
+assert.equal(calls, callsBeforeThresholdExport, 'Below-threshold export makes no external calls');
+assert.equal(writes, writesBeforeThresholdExport, 'Below-threshold export is read-only');
+llmRequest = null;
+const belowWithoutLlm = await proposeBelowThreshold(false);
+assert.equal(belowWithoutLlm.noTicketReason, thresholdReason);
+assert.equal(belowWithoutLlm.engine, 'statistics');
+assert.equal(llmRequest, null);
+const belowWithoutLlmDossier = await successful(await get('jobId=' + jobId));
+assert.equal(belowWithoutLlmDossier.ticket.noTicketReason, thresholdReason);
+assert.equal(belowWithoutLlmDossier.ticket.ticketProbabilityExploratory, null);
+assert.equal(belowWithoutLlmDossier.llm.requested, false);
+for (const field of ['input', 'instructions', 'parameters', 'model'])
+  assert.equal(belowWithoutLlmDossier.llm[field], null);
+
 const laterProposal = await successful(await post('propose', { jobId }));
 assert.notEqual(laterProposal.evidence.proposalId, proposed.evidence.proposalId);
 assert.deepEqual(

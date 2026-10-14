@@ -75,7 +75,9 @@ Les dates sont ISO 8601 UTC ; une heure source inconnue reste `null`.
 `ticket` contient `verdict`, `selections`, `combinedOdds` (produit des cotes, sinon
 `null`), `combinedProbability` (actuellement `null`), et
 `rules: {singleBookmaker: true, oneSelectionPerMatch: true, maxSelections: 4}`.
-`ticketProbability` est facultatif ; le dossier ne le calcule pas.
+`ticketProbability`, `ticketProbabilityExploratory` et `noTicketReason` sont
+facultatifs ; le dossier conserve les valeurs du serveur sans les recalculer,
+y compris le motif d'absence de ticket lorsque le LLM n'est pas configuré.
 
 Le classement compare les candidats selon `prudentProbability`, puis `prudentEdge`,
 avec au plus quatre matchs et un événement par match. Il compare les bookmakers
