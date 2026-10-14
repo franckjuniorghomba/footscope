@@ -7,34 +7,57 @@ import { selectCoupon } from './coupon.js';
 import { llmExplanation } from './llm.js';
 import { settle } from './storage.js';
 
-async function signature(env, payload) {
-  const key = await crypto.subtle.importKey(
+// Clé de scellement dédiée, dérivée de API_FOOTBALL_KEY par HKDF-SHA-256 : la clé du
+// fournisseur ne sert plus directement de clé HMAC. Le sel est fixe et public (séparation
+// de domaine) ; la confidentialité repose uniquement sur API_FOOTBALL_KEY.
+const SEAL_SALT = 'footscope/seal/salt/v1';
+const SEAL_INFO = 'footscope-seal-v1';
+async function signature(env) {
+  if (typeof env.API_FOOTBALL_KEY !== 'string' || !env.API_FOOTBALL_KEY)
+    throw Object.assign(Error('Signature des analyses indisponible.'), { status: 503 });
+  const encode = (text) => new TextEncoder().encode(text);
+  const material = await crypto.subtle.importKey(
     'raw',
-    new TextEncoder().encode(env.API_FOOTBALL_KEY),
-    { name: 'HMAC', hash: 'SHA-256' },
+    encode(env.API_FOOTBALL_KEY),
+    'HKDF',
     false,
-    ['sign'],
+    ['deriveKey'],
   );
-  return Array.from(
-    new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload))),
-  )
-    .map((x) => x.toString(16).padStart(2, '0'))
-    .join('');
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: encode(SEAL_SALT), info: encode(SEAL_INFO) },
+    material,
+    { name: 'HMAC', hash: 'SHA-256', length: 256 },
+    false,
+    ['sign', 'verify'],
+  );
 }
 async function seal(env, report) {
   const payload = JSON.stringify({ report, expires: Date.now() + 600000 });
-  return { payload, signature: await signature(env, payload) };
+  const mac = await crypto.subtle.sign(
+    'HMAC',
+    await signature(env),
+    new TextEncoder().encode(payload),
+  );
+  return {
+    payload,
+    signature: Array.from(new Uint8Array(mac), (x) => x.toString(16).padStart(2, '0')).join(''),
+  };
 }
 async function unseal(env, token) {
+  const key = await signature(env);
   if (
     typeof token?.payload !== 'string' ||
     token.payload.length > 5000000 ||
     typeof token.signature !== 'string' ||
-    token.signature !== (await signature(env, token.payload))
+    !/^[0-9a-f]{64}$/.test(token.signature)
   )
     throw Error('Analyse altérée. Relancez la vérification.');
+  const mac = new Uint8Array(token.signature.match(/../g).map((x) => parseInt(x, 16)));
+  // Vérification en temps constant par WebCrypto, jamais par comparaison de chaînes.
+  if (!(await crypto.subtle.verify('HMAC', key, mac, new TextEncoder().encode(token.payload))))
+    throw Error('Analyse altérée. Relancez la vérification.');
   const p = JSON.parse(token.payload);
-  if (p.expires < Date.now()) throw Error('Analyse expirée. Relancez la vérification.');
+  if (!(p.expires >= Date.now())) throw Error('Analyse expirée. Relancez la vérification.');
   return p.report;
 }
 
