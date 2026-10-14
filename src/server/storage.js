@@ -116,6 +116,87 @@ function bootstrapROI(matches) {
   return [percentile(0.025), percentile(0.975)];
 }
 
+const ticketProbability = (p) => Number.isFinite(p) && p >= 0 && p <= 1;
+
+// One proposed coupon = one ticket. It counts only once every selection is settled.
+function ticketSummary(r) {
+  const n = r.selections.length;
+  if (r.outcomes?.length !== n || r.outcomes.some((o) => typeof o?.won !== 'boolean')) return null;
+  const recorded = ticketProbability(r.combinedProbability);
+  const fromSelections = r.selections.every((s) => ticketProbability(s.probability))
+    ? r.selections.reduce((p, s) => p * s.probability, 1)
+    : null;
+  const books = new Set(r.selections.map((s) => s.bookmaker));
+  return {
+    id: r.id ?? null,
+    generatedAt: r.generatedAt ?? null,
+    passed: r.outcomes.every((o) => o.won),
+    announcedProbability: recorded ? r.combinedProbability : fromSelections,
+    probabilitySource: recorded ? 'recorded' : fromSelections === null ? null : 'selections',
+    selections: n,
+    bookmaker: books.size === 1 ? r.selections[0].bookmaker : null,
+    modelVersion: r.modelVersion ?? null,
+    key: r.selections
+      .map((s) => [s.matchId, s.market, s.selection, s.bookmaker].join('|'))
+      .sort()
+      .join('&'),
+  };
+}
+
+function ticketStats(list) {
+  const n = list.length,
+    passed = list.filter((t) => t.passed).length,
+    priced = list.filter((t) => t.announcedProbability !== null);
+  const meanAnnounced = priced.length
+    ? priced.reduce((s, t) => s + t.announcedProbability, 0) / priced.length
+    : null;
+  return {
+    settled: n,
+    passed,
+    passRate: n ? passed / n : null,
+    passRateCI: wilson95(passed, n),
+    withProbability: priced.length,
+    meanAnnouncedProbability: meanAnnounced,
+    // Observed minus announced, on the tickets that carry a probability.
+    gap: priced.length
+      ? priced.filter((t) => t.passed).length / priced.length - meanAnnounced
+      : null,
+  };
+}
+
+function ticketPerformance(settled) {
+  const seen = new Set(),
+    matchesSeen = new Set(),
+    items = [];
+  let sharedMatchTickets = 0;
+  for (const r of settled) {
+    const t = ticketSummary(r);
+    if (!t || seen.has(t.key)) continue;
+    seen.add(t.key);
+    const ids = r.selections.map((s) => s.matchId);
+    if (ids.some((id) => matchesSeen.has(id))) sharedMatchTickets++;
+    ids.forEach((id) => matchesSeen.add(id));
+    const { key, ...item } = t;
+    items.push(item);
+  }
+  const stats = ticketStats(items);
+  return {
+    ...stats,
+    sharedMatchTickets,
+    bySelections: Object.fromEntries(
+      [1, 2, 3, 4].map((k) => [k, ticketStats(items.filter((t) => t.selections === k))]),
+    ),
+    sampleWarning: items.length < 30,
+    sampleWarningText:
+      items.length < 30
+        ? 'Moins de 30 tickets réglés : taux de passage exploratoire, à interpréter avec prudence.'
+        : null,
+    items,
+    scope:
+      "Un coupon proposé = un ticket, compté seulement quand toutes ses sélections sont réglées ; passé si toutes sont gagnantes. Tickets identiques (mêmes événements) dédoublonnés, premier conservé. Probabilité annoncée : combinedProbability enregistrée si elle est dans [0 ; 1], sinon produit des probabilités ponctuelles (probability) des sélections enregistrées, sans modéliser la dépendance entre matchs ; absente si une probabilité de sélection manque. Écart = taux observé − probabilité moyenne annoncée, sur les tickets dotés d'une probabilité. IC 95 % de Wilson par ticket : il suppose des tickets indépendants, ce qui n'est vrai que si leurs matchs sont distincts (sharedMatchTickets compte les tickets partageant un match avec un ticket antérieur). Ventilation par nombre de sélections (1 à 4). Avertissement sous 30 tickets réglés. modelVersion vaut null quand le coupon enregistré ne la porte pas.",
+  };
+}
+
 export async function performance(env) {
   const rows = await observations(env);
   const settled = rows.map((x) => x.data).filter((x) => x.settled && x.selections.length);
@@ -185,6 +266,7 @@ export async function performance(env) {
       matches.size < 100
         ? 'Moins de 100 matchs distincts réglés : échantillon limité, résultats exploratoires à interpréter avec prudence.'
         : null,
+    tickets: ticketPerformance(settled),
     modelValidated: false,
     scope:
       "Sept derniers jours, 80 coupons maximum ; événements dédoublonnés, première estimation conservée, une unité fictive par sélection. IC 95 % : Wilson par sélection pour le taux de réussite ; bootstrap par match pour le ROI (mulberry32, graine 164, 1000 rééchantillonnages, percentiles interpolés). L'IC de Wilson suppose des sélections indépendantes : plusieurs sélections d'un même match le rendent trop étroit ; l'IC du ROI, calculé par match, en tient compte. Avertissement sous 100 matchs distincts réglés. Calibration : tranches [0,70 ; 0,75), puis pas de 0,05 ; dernière tranche [0,95 ; 1,00]. Probabilités inférieures à 0,70, supérieures à 1 ou absentes/non finies exclues de la calibration. Ce suivi prospectif exploratoire ne constitue pas un test historique indépendant ni une validation du modèle.",
