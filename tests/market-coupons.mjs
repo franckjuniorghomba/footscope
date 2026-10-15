@@ -28,6 +28,8 @@ assert.equal(new Set(coupons.flatMap((c) => c.selections.map((s) => s.matchId)))
 assert.deepEqual(compose([...reports].reverse()), coupons);
 for (const c of coupons) {
   assert.equal(c.bookmaker, 'bet365');
+  for (const selection of c.selections)
+    assert.equal(selection.fairOdds, 1 / selection.marketProbability);
   assert.equal(
     c.confidence,
     c.selections.reduce((p, s) => p * s.marketProbability, 1),
@@ -66,11 +68,40 @@ assert.equal(compose([older])[0].selections[0].oddsAgeMinutes, 1439);
 assert.equal(compose([older])[0].selections[0].valueVsMarket, null);
 older.marketCouponQuotes[0].update = new Date(now - 1440 * 60000).toISOString();
 assert.equal(compose([older]).length, 0, '24 heures exclues même avec Pinnacle frais');
+// Repère ancien avec cote bet365 fraîche : admission <24 h, badge ≤30 min.
+for (const minutes of [30, 31, 1439, 1440, -5, -6]) {
+  const r = marketReport(1);
+  r.marketCouponQuotes.push({
+    ...structuredClone(r.marketCouponQuotes[0]),
+    update: new Date(now - minutes * 60000).toISOString(),
+    bookmakers: [r.marketCouponQuotes[0].bookmakers.pop()],
+  });
+  const result = compose([r]);
+  assert.equal(result.length, minutes < 1440 && minutes >= -5 ? 1 : 0, `repère ${minutes} min`);
+  if (result.length) {
+    assert.equal(result[0].selections[0].oddsAgeMinutes, 0);
+    assert.equal(result[0].selections[0].valueVsMarket === null, minutes > 30);
+  }
+}
 assert.equal(
   mutate((r) => (r.marketCouponQuotes[0].update = new Date(now - 31 * 60000).toISOString())).length,
-  0,
-  'repères périmés',
+  1,
+  'cote et repère à 31 min admis',
 );
+// Repli : tous les repères utilisés doivent rester <24 h ; badge ≤30 min.
+for (const minutes of [31, 1439, 1440]) {
+  const r = marketReport(1);
+  const reference = r.marketCouponQuotes[0].bookmakers.pop();
+  reference.name = 'Other';
+  r.marketCouponQuotes.push({
+    fixture: { id: 1 },
+    update: new Date(now - minutes * 60000).toISOString(),
+    bookmakers: [reference],
+  });
+  const result = compose([r]);
+  assert.equal(result.length, minutes < 1440 ? 1 : 0, `repli ${minutes} min`);
+  if (result.length) assert.equal(result[0].selections[0].valueVsMarket, null);
+}
 const sharpPriority = marketReport(1);
 sharpPriority.marketCouponQuotes[0].bookmakers.push({
   name: 'Other',
@@ -112,6 +143,14 @@ for (const book of dc.marketCouponQuotes[0].bookmakers)
   ];
 assert.equal(compose([dc])[0].selections[0].marketProbability, 0.8);
 assert.equal(compose([dc])[0].selections[0].minOdds, 1.25);
+assert.equal(compose([dc])[0].selections[0].fairOdds, 1.25);
+for (const minutes of [31, 1439, 1440]) {
+  const r = structuredClone(dc);
+  r.marketCouponQuotes[0].update = new Date(now - minutes * 60000).toISOString();
+  const result = compose([r]);
+  assert.equal(result.length, minutes < 1440 ? 1 : 0, `double chance ${minutes} min`);
+  if (result.length) assert.equal(result[0].selections[0].fairOdds, 1.25);
+}
 for (const market of ['Match Winner', 'Goals Over/Under']) {
   const r = marketReport(1);
   for (const book of r.marketCouponQuotes[0].bookmakers)
@@ -137,6 +176,10 @@ for (const market of ['Match Winner', 'Goals Over/Under']) {
             },
           ];
   assert.equal(compose([r])[0].selections[0].market, market);
+  for (const minutes of [31, 1439, 1440]) {
+    r.marketCouponQuotes[0].update = new Date(now - minutes * 60000).toISOString();
+    assert.equal(compose([r]).length, minutes < 1440 ? 1 : 0, `${market} ${minutes} min`);
+  }
 }
 assert.equal(
   mutate((r) => {

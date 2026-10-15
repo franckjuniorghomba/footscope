@@ -72,12 +72,13 @@ export function buildMarketCoupons(reports, now = Date.now()) {
         if (!(Number.isFinite(odd) && odd > 1)) continue;
         const probabilities = refs.flatMap((ref) => {
           const refAge = age(ref.updated, now);
-          if (!(refAge >= -300000 && refAge <= POLICY.maxMarketOddsAgeMs)) return [];
-          const p = fairProbability(ref, bet.name, quote.value, now);
-          return Number.isFinite(p) && p > 0 && p < 1 ? [p] : [];
+          if (!(refAge >= -300000 && refAge < POLICY.maxOddsAgeMs)) return [];
+          const p = fairProbability(ref, bet.name, quote.value, now, POLICY.maxOddsAgeMs);
+          return Number.isFinite(p) && p > 0 && p < 1 ? [{ probability: p, age: refAge }] : [];
         });
         if (probabilities.length < (books.has('pinnacle') ? 1 : 2)) continue;
-        const marketProbability = probabilities.reduce((s, p) => s + p, 0) / probabilities.length;
+        const marketProbability =
+          probabilities.reduce((s, p) => s + p.probability, 0) / probabilities.length;
         if (marketProbability > 0.9 || marketProbability < 0.7 || marketProbability > 0.85)
           continue;
         const model = report.model;
@@ -98,12 +99,17 @@ export function buildMarketCoupons(reports, now = Date.now()) {
           market: bet.name,
           selection: quote.value,
           marketProbability,
+          fairOdds: 1 / marketProbability,
           modelProbability,
           modelCheck: modelProbability === null ? 'non vérifié' : 'ok',
           odd,
           minOdds: Math.ceil((1 / marketProbability) * 100) / 100,
           oddsAgeMinutes: Math.max(0, quoteAge / 60000),
-          valueVsMarket: quoteAge <= POLICY.maxMarketOddsAgeMs ? odd * marketProbability - 1 : null,
+          valueVsMarket:
+            quoteAge <= POLICY.maxMarketOddsAgeMs &&
+            probabilities.every((p) => p.age <= POLICY.maxMarketOddsAgeMs)
+              ? odd * marketProbability - 1
+              : null,
         };
         const previous = candidates.get(report.matchId);
         if (!previous || compare(candidate, previous) < 0)
