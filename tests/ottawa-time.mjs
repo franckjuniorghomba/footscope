@@ -154,6 +154,40 @@ runInNewContext(
   },
 );
 assert.equal(dateField.value, '2026-10-15');
+
+// Le script prépare le jour civil d'Ottawa, indépendamment du fuseau de la machine.
+const liveScript = await readFile('scripts/update-live.mjs', 'utf8');
+for (const [instant, expected, explicitDate] of [
+  ['2026-10-15T03:59:59Z', '2026-10-14'],
+  ['2026-10-15T04:00:00Z', '2026-10-15'],
+  ['2026-11-01T03:59:59Z', '2026-10-31'],
+  ['2026-11-01T04:00:00Z', '2026-11-01'],
+  ['2026-11-01T05:30:00Z', '2026-11-01'],
+  ['2026-11-01T06:30:00Z', '2026-11-01'],
+  ['2026-11-02T04:59:59Z', '2026-11-01'],
+  ['2026-11-02T05:00:00Z', '2026-11-02'],
+  ['2026-11-03T05:30:00Z', '2026-11-03'],
+  ['2026-10-15T04:30:00Z', '2026-10-20', '2026-10-20'],
+]) {
+  const stop = new Error('Stop after mocked prepare');
+  const ctx = {
+    process: { stdin: { on() {} } },
+    AbortSignal,
+    Date: class extends Date {
+      constructor() {
+        super(instant);
+      }
+    },
+    fetch: async (url, options) => {
+      assert(url.endsWith('/api/assistant/prepare'));
+      assert.equal(options.method, 'POST');
+      assert.deepEqual(JSON.parse(options.body), { date: expected });
+      throw stop;
+    },
+  };
+  runInNewContext(liveScript, ctx);
+  await assert.rejects(ctx.main({ token: 'mock-token', date: explicitDate }), (e) => e === stop);
+}
 console.log(
-  'Passed: Ottawa summer/winter display, midnight, 25/23-hour days, all fixtures, API timezone and refusals, stable archive keys.',
+  'Passed: Ottawa summer/winter display, midnight, 25/23-hour days, all fixtures, API timezone and refusals, stable archive keys, live script prepare dates.',
 );
