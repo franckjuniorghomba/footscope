@@ -64,10 +64,10 @@ refusals[0].teams.home.name +=
   env.API_RELAY_TOKEN;
 refusals[0].fixture.identity = 'private-person-sentinel';
 let fixtures = refusals;
-// BIS-217 : le refus de fraîcheur du match 4 exige désormais plus de 3 h.
+// BIS-217 : le refus de fraîcheur du match 4 exige désormais plus de 24 h.
 const odds = (id) => ({
   fixture: { id },
-  update: new Date(id === 4 ? now - 181 * 60000 : now).toISOString(),
+  update: new Date(id === 4 ? now - 1441 * 60000 : now).toISOString(),
   bookmakers: [
     {
       name: id === 106 ? 'Book B' : 'Book A',
@@ -840,6 +840,16 @@ const normalizedDecision = ticketDecision(
   now,
 );
 assert.equal(normalizedDecision.events[0].reasons[0].code, 'CANDIDATE_RANKING');
+// La décision du dossier applique aussi la fenêtre de 24 h, avec sa frontière incluse.
+for (const minutes of [1439, 1440, 1441]) {
+  const agedSnapshot = structuredClone(normalizedSnapshot);
+  agedSnapshot.report.events[0].updated = new Date(now - minutes * 60000).toISOString();
+  const decision = ticketDecision(agedSnapshot, [], now);
+  assert.equal(
+    decision.events[0].reasons[0].code,
+    minutes <= 1440 ? 'CANDIDATE_RANKING' : 'ODDS_STALE_OR_INVALID',
+  );
+}
 assert.equal(EVIDENCE_LIMITS.proposalBytes, 8 * 1024 * 1024);
 console.log(
   'Passed: realistic 900 quotes/match, UTF-8 byte ceilings, on-demand snapshots, complete byte pagination, lost R2 writes/missing snapshot preserve ticket, safe logs and relay/short-key redaction.',

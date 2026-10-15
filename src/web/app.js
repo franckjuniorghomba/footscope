@@ -87,7 +87,7 @@ function moveFocus(el) {
 }
 function fresh(s) {
   const age = Date.now() - Date.parse(s);
-  return Number.isFinite(age) && age >= -300000 && age <= 3 * 60 * 60000;
+  return Number.isFinite(age) && age >= -300000 && age <= 24 * 60 * 60000;
 }
 async function get(path) {
   const r = await fetch(path, { credentials: 'same-origin' });
@@ -691,7 +691,9 @@ function renderCoupon() {
             esc(x.bookmaker) +
             ' · ' +
             esc(oddsAge(x.updated)) +
-            '</span></div><strong class="odd">' +
+            '</span>' +
+            oddsWarningHTML(x) +
+            '</div><strong class="odd">' +
             x.odd.toFixed(2) +
             '</strong><button class="iconbtn" data-remove="' +
             i +
@@ -989,6 +991,27 @@ function oddsAge(updated, now = Date.now()) {
 function oddsAgeHTML(updated) {
   return '<span class="oddsage">' + esc(oddsAge(updated)) + '</span>';
 }
+// Le minimum affiché est arrondi vers le haut : un prix inférieur ne suffit pas.
+function oddsWarningHTML(x) {
+  const age = oddsAge(x.updated);
+  const label = age.startsWith('cote mise à jour il y a ')
+    ? age.replace('cote mise à jour', 'Cote relevée') + '.'
+    : age + '.';
+  const minimum =
+    Number.isFinite(x.minOdds) && x.minOdds > 1
+      ? (Math.ceil(x.minOdds * 100) / 100).toFixed(2)
+      : null;
+  return (
+    '<p class="note oddsnotice">' +
+    esc(label) +
+    ' Vérifie la cote actuelle chez le bookmaker : ne joue que si elle est au moins égale à la cote minimum affichée.' +
+    '<br>Cote minimum : <strong>' +
+    (minimum || 'indisponible') +
+    '</strong>' +
+    (minimum ? '' : ' · Ne joue pas sans cote minimum vérifiée.') +
+    '</p>'
+  );
+}
 function eventHTML(x, market, role, index) {
   return (
     '<div class="eventitem"><b>' +
@@ -1000,6 +1023,7 @@ function eventHTML(x, market, role, index) {
     ' @ ' +
     Number(x.odd).toFixed(2) +
     oddsAgeHTML(x.updated) +
+    oddsWarningHTML(x) +
     '<br><span class="tag ' +
     (x.status === 'simulation_eligible' ? 'ok' : '') +
     '">' +
@@ -1015,9 +1039,7 @@ function eventHTML(x, market, role, index) {
         (x.breakEven * 100).toFixed(1) +
         ' % · Avantage prudent : ' +
         (x.prudentEdge * 100).toFixed(1) +
-        ' %<br>Cote minimum : ' +
-        (Number.isFinite(x.minOdds) ? x.minOdds.toFixed(2) : '—') +
-        ' · ' +
+        ' % · ' +
         esc(x.bookmaker) +
         '</p>'
       : '') +
@@ -1045,6 +1067,7 @@ function pickHTML(x, market, index) {
     kickoff(x.kickoff) +
     '</span>' +
     oddsAgeHTML(x.updated) +
+    oddsWarningHTML(x) +
     '</div><span class="odd"><span class="visually-hidden">Cote </span>' +
     Number(x.odd).toFixed(2) +
     '</span>' +
