@@ -127,25 +127,27 @@
     U+A720-A7FF;
 }
 
-/* Jetons du design system Footscope (tokens.json, version 1). Un seul thème, sombre. */
+/* BIS-222 : Carnet de match (clair), Tribune (sombre). */
 :root {
-  color-scheme: dark;
-  /* Couleurs */
-  --bg-900: #050c15;
-  --bg-800: #0a1622;
-  --bg-700: #0f1e2a;
-  --line: #1c3248;
-  --line-strong: #64788a;
-  --ink: #f7f8f9;
-  --ink-soft: #e6eef5;
-  --ink-muted: #b9c0c8;
-  --ink-subtle: #8a9bb0;
-  --pitch: #98fa5f;
-  --pitch-text: #a8e66a;
-  --on-pitch: #07131b;
-  --data-away: #4f96e8;
-  --data-neutral: #dee0e3;
-  --data-empty: #54616f;
+  color-scheme: light;
+  --bg-900: #f5f4ef;
+  --bg-800: #ffffff;
+  --bg-700: #e4eee6;
+  --line: #c9d0c8;
+  --line-strong: #738278;
+  --ink: #182a26;
+  --ink-soft: #182a26;
+  --ink-muted: #53635c;
+  --ink-subtle: #53635c;
+  --pitch: #245d46;
+  --pitch-text: #245d46;
+  --on-pitch: #ffffff;
+  --data-away: #155db0;
+  --data-neutral: #53635c;
+  --data-empty: #738278;
+  --focus: #155db0;
+  --warn: #754b13;
+  --warnbg: #f5ecd8;
   /* Typographie : Outfit et Barlow (Google Fonts, chargées dans index.html avec
      display=swap), sinon police système */
   --font-display: 'Outfit', 'Gilroy', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -192,12 +194,7 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  /* Stade de nuit sans photographie : dégradé sombre et discret. */
-  background:
-    radial-gradient(900px 520px at 85% -10%, rgba(152, 250, 95, 0.09), transparent 70%),
-    radial-gradient(700px 480px at 0% 0%, rgba(79, 150, 232, 0.08), transparent 70%),
-    linear-gradient(180deg, var(--bg-800) 0, var(--bg-900) 640px) no-repeat,
-    var(--bg-900);
+  background: var(--bg-900);
   color: var(--ink-muted);
   font: var(--body);
   -webkit-font-smoothing: antialiased;
@@ -492,7 +489,7 @@ main {
 
 /* Ticket du jour : le produit principal. */
 .ticket {
-  background: rgba(15, 30, 42, 0.92);
+  background: var(--bg-800);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-panel);
@@ -721,7 +718,7 @@ details.more > :not(summary) {
   margin-bottom: var(--space-4);
   padding: var(--space-3);
   border-left: 3px solid var(--pitch);
-  background: rgba(152, 250, 95, 0.06);
+  background: var(--bg-700);
   color: var(--ink-soft);
 }
 .mcoupon {
@@ -823,8 +820,8 @@ details.more > :not(summary) {
   color: var(--ink-muted);
 }
 .tag.ok {
-  border-color: rgba(152, 250, 95, 0.45);
-  background: rgba(152, 250, 95, 0.08);
+  border-color: var(--line-strong);
+  background: var(--bg-700);
   color: var(--pitch-text);
 }
 /* Coche ✓ réservée aux statuts de données (charte). */
@@ -1672,4 +1669,275 @@ footer.site {
   line-height: 1.5;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* Compositions réutilisant les cartes, badges et lignes existants ; aucun composant externe. */
+:root {
+  --page-max: 1040px;
+  --gutter: 40px;
+  --body: 400 16px/1.45 var(--font-sans);
+  --small: 400 14px/1.45 var(--font-sans);
+  --caption: 400 14px/1.45 var(--font-sans);
+  --shadow-panel: none;
+  --glow-pitch: none;
+  --radius-md: 8px;
+  --radius-lg: 8px;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg-900: #101916;
+  --bg-800: #192720;
+  --bg-700: #283c2d;
+  --line: #465b4b;
+  --line-strong: #7f9585;
+  --ink: #f2f5ef;
+  --ink-soft: #f2f5ef;
+  --ink-muted: #b7c7bc;
+  --ink-subtle: #b7c7bc;
+  --pitch: #b9d6a5;
+  --pitch-text: #b9d6a5;
+  --on-pitch: #101916;
+  --data-away: #93bfff;
+  --data-neutral: #b7c7bc;
+  --data-empty: #7f9585;
+  --focus: #93bfff;
+  --warn: #f4d49b;
+  --warnbg: #3c3020;
+}
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+header.site {
+  gap: 20px;
+  flex-wrap: wrap;
+  border-bottom: 2px solid var(--ink);
+}
+header.site nav {
+  margin-left: auto;
+}
+#themeToggle {
+  padding: 8px 12px;
+  min-height: 48px;
+}
+header.site .pill {
+  border: 0;
+  padding: 0;
+  font-size: 14px;
+}
+.brand {
+  letter-spacing: -1px;
+}
+.hero {
+  display: block;
+  padding: 28px 0;
+}
+.hero h1 {
+  font-size: 44px;
+  font-weight: 700;
+}
+.hero .lead {
+  font-size: 18px;
+  line-height: 1.45;
+  margin-top: 12px;
+}
+.hero .cta,
+.hero .trust {
+  display: none;
+}
+.heroside {
+  margin-top: 28px;
+  gap: 28px;
+}
+.eyebrow {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 16px;
+}
+.eyebrow::before {
+  display: none;
+}
+.tickethead h2.eyebrow {
+  font: 700 23px/1.2 var(--font-display);
+}
+.ticket {
+  box-shadow: none;
+  padding: 24px;
+}
+.ticket.marketcoupons {
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+.mcoupon {
+  border-top: 4px solid var(--pitch);
+  background: var(--bg-800);
+  padding: 24px;
+}
+.mchead {
+  align-items: center;
+}
+.mctotals {
+  gap: 24px;
+}
+.mctotals dd {
+  font-size: 30px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.mctotals dd.prob {
+  font-size: 38px;
+}
+.mctotals dt,
+.mcfacts dt,
+.ticketfacts dt {
+  text-transform: none;
+  letter-spacing: 0;
+}
+.mcpick {
+  padding: 20px 0;
+  gap: 12px;
+}
+.mcmatch b {
+  font-size: 18px;
+}
+.mcfacts {
+  gap: 12px 28px;
+}
+.mcwarn {
+  background: var(--warnbg);
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.chip,
+.tag {
+  border-radius: 3px;
+  white-space: normal;
+}
+.ticketempty,
+.mcmsg {
+  border: 0;
+  padding: 12px 0;
+}
+.ticketfacts div {
+  border: 0;
+  padding: 12px 0;
+  background: transparent;
+}
+.facts {
+  gap: 0;
+  border-block: 1px solid var(--line);
+  margin-bottom: 32px;
+}
+.fact {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 16px;
+}
+.matchgrid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+.match {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.5fr) auto;
+  align-items: center;
+  padding: 20px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  border-radius: 0;
+}
+.matchfoot {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.match .crest {
+  display: none;
+}
+.dateband {
+  margin-top: 24px;
+}
+.dates {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.dates button {
+  min-height: 70px;
+  padding: 8px;
+  color: var(--ink-muted);
+  border: 0;
+  border-bottom: 2px solid var(--line);
+  background: transparent;
+  border-radius: 4px;
+}
+.dates button[aria-current] {
+  background: var(--ink);
+  color: var(--bg-900);
+  border-color: var(--ink);
+  font-weight: 700;
+}
+.btn,
+input,
+select,
+summary {
+  min-height: 48px;
+}
+@media (max-width: 720px) {
+  :root {
+    --gutter: 20px;
+  }
+  header.site {
+    gap: 12px;
+    padding-bottom: 12px;
+  }
+  header.site nav {
+    order: 4;
+    margin: 0;
+    width: 100%;
+  }
+  header.site .pill {
+    width: 100%;
+  }
+  #themeToggle {
+    margin-left: auto;
+  }
+  .hero h1 {
+    font-size: 34px;
+  }
+  .ticket,
+  .mcoupon {
+    padding: 20px;
+  }
+  .ticket.marketcoupons {
+    padding: 0;
+  }
+  .tickethead {
+    align-items: flex-start;
+  }
+  .mchead {
+    display: grid;
+    gap: 20px;
+  }
+  .mctotals {
+    justify-content: space-between;
+  }
+  .match {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .matchfoot {
+    flex-direction: row;
+    align-items: center;
+  }
+  .dates button {
+    font-size: 14px;
+    padding: 8px 4px;
+  }
 }

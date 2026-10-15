@@ -43,17 +43,26 @@
         <button data-view="today" class="active" aria-current="page">Analyses</button
         ><button data-view="method">Méthode</button><button data-view="journal">Historique</button>
       </nav>
+      <button class="btn secondary" id="themeToggle" type="button" aria-pressed="false">
+        Mode sombre
+      </button>
       <span class="pill" id="connectionPill"
         ><span class="dot" aria-hidden="true"></span
         ><span id="connection">Connexion en cours</span></span
       >
     </header>
-    <main id="main">
+    <main id="main" tabindex="-1">
       <section id="today">
+        <div class="dateband">
+          <div id="dateStrip" class="dates" role="group" aria-label="Dates du programme"></div>
+          <p class="note">
+            Heures d’Ottawa · la date précise et les filtres sont disponibles dans le programme.
+          </p>
+        </div>
         <div class="hero">
           <div class="herotext">
-            <p class="eyebrow">Le football, éclairé par les données</p>
-            <h1>Comprendre le match. <span>Avant le coup d’envoi.</span></h1>
+            <p class="eyebrow">Le carnet du football</p>
+            <h1>Lire le match.<span>Voir les données.</span></h1>
             <p class="lead">
               Explorez les statistiques, comparez les scénarios et testez vos analyses en
               simulation.
