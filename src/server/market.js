@@ -130,7 +130,7 @@ function twoWay(bet, first, second) {
 // Probabilité juste Pinnacle d'une sélection : 1X2 par marketReference (BIS-172),
 // double chance comme somme de deux issues 1X2 justes (jamais normalisée directement),
 // plus/moins et « les deux marquent » normalisés à deux issues. undefined : non pris en charge.
-function fairProbability(reference, market, selection, now) {
+export function fairProbability(reference, market, selection, now) {
   const bets = (name) => reference.bets.filter((m) => m.name === name);
   const single = (name) => (bets(name).length === 1 ? bets(name)[0] : null);
   if (market === 'Match Winner' || market === 'Double Chance') {

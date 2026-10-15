@@ -49,31 +49,55 @@ export async function settle(env) {
   const records = await observations(env);
   let updated = 0,
     examined = 0;
+  const fixtures = new Map();
   for (const { key, data: r } of records) {
-    if (r.settled || !r.selections.length) continue;
-    if (r.selections.some((x) => Date.parse(x.kickoff) + 3 * 3600000 > Date.now())) continue;
-    if (examined >= 8) break;
-    examined++;
-    const outcomes = [];
-    for (const x of r.selections) {
-      const f = (await api(env, 'fixtures?id=' + x.matchId, 60000)).response[0];
-      const outcome = f ? settledOutcome(x, f) : null;
-      outcomes.push({
-        matchId: x.matchId,
-        market: x.market,
-        selection: x.selection,
-        won: outcome,
-        score: f?.goals || null,
-      });
+    let changed = false;
+    for (const observation of [r, ...(r.marketCouponTracking || [])]) {
+      if (observation.settled || !observation.selections.length) continue;
+      if (observation.selections.some((x) => Date.parse(x.kickoff) + 3 * 3600000 > Date.now()))
+        continue;
+      if (examined >= 8) break;
+      examined++;
+      const outcomes = [];
+      for (const x of observation.selections) {
+        if (!fixtures.has(x.matchId))
+          fixtures.set(x.matchId, (await api(env, 'fixtures?id=' + x.matchId, 60000)).response[0]);
+        const f = fixtures.get(x.matchId);
+        outcomes.push({
+          matchId: x.matchId,
+          market: x.market,
+          selection: x.selection,
+          won: f ? settledOutcome(x, f) : null,
+          score: f?.goals || null,
+        });
+      }
+      observation.outcomes = outcomes;
+      observation.settled = outcomes.every((x) => x.won !== null);
+      observation.settledAt = new Date().toISOString();
+      changed = true;
     }
-    r.outcomes = outcomes;
-    r.settled = outcomes.every((x) => x.won !== null);
-    r.settledAt = new Date().toISOString();
-    await env.BUCKET.put(key, JSON.stringify(r));
-    updated++;
+    if (changed) {
+      await env.BUCKET.put(key, JSON.stringify(r));
+      updated++;
+    }
   }
   return { available: true, updated, examined };
 }
+// Type distinct, confiance figée : aucune réinterprétation des tickets historiques.
+export function marketCouponObservations(coupons, generatedAt) {
+  return coupons.map((coupon) => ({
+    type: 'coupon marché',
+    id: coupon.id,
+    generatedAt,
+    combinedProbability: coupon.confidence,
+    selections: coupon.selections.map((s) => ({ ...s, bookmaker: coupon.bookmaker })),
+    outcomes: [],
+    settled: false,
+    modelValidated: false,
+    realMoneyEligible: false,
+  }));
+}
+
 function wilson95(wins, n) {
   if (!n) return null;
   const z = 1.959963984540054,
@@ -267,6 +291,17 @@ export async function performance(env) {
         ? 'Moins de 100 matchs distincts réglés : échantillon limité, résultats exploratoires à interpréter avec prudence.'
         : null,
     tickets: ticketPerformance(settled),
+    marketCoupons: {
+      type: 'coupon marché',
+      ...ticketPerformance(
+        rows
+          .flatMap((x) => x.data.marketCouponTracking || [])
+          .filter((x) => x.type === 'coupon marché' && x.settled && x.selections.length)
+          .sort((a, b) => Date.parse(a.generatedAt) - Date.parse(b.generatedAt)),
+      ),
+      scope:
+        'Coupons marché descriptifs, suivis séparément des tickets : confiance annoncée enregistrée, sans recalcul. Sept derniers jours, mêmes 80 observations maximum ; coupons identiques dédoublonnés, première confiance conservée. Produit des probabilités marché sans modélisation de dépendance, modèle non validé.',
+    },
     modelValidated: false,
     scope:
       "Sept derniers jours, 80 coupons maximum ; événements dédoublonnés, première estimation conservée, une unité fictive par sélection. IC 95 % : Wilson par sélection pour le taux de réussite ; bootstrap par match pour le ROI (mulberry32, graine 164, 1000 rééchantillonnages, percentiles interpolés). L'IC de Wilson suppose des sélections indépendantes : plusieurs sélections d'un même match le rendent trop étroit ; l'IC du ROI, calculé par match, en tient compte. Avertissement sous 100 matchs distincts réglés. Calibration : tranches [0,70 ; 0,75), puis pas de 0,05 ; dernière tranche [0,95 ; 1,00]. Probabilités inférieures à 0,70, supérieures à 1 ou absentes/non finies exclues de la calibration. Ce suivi prospectif exploratoire ne constitue pas un test historique indépendant ni une validation du modèle.",
