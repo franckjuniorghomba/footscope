@@ -1028,9 +1028,14 @@ function validMarketSelection(x) {
   return (
     x &&
     typeof x === 'object' &&
+    (typeof x.matchId === 'string' ||
+      (typeof x.matchId === 'number' && Number.isFinite(x.matchId))) &&
     ['match', 'market', 'selection'].every((k) => typeof x[k] === 'string' && x[k]) &&
+    typeof x.kickoff === 'string' &&
+    Number.isFinite(Date.parse(x.kickoff)) &&
     isRatio(x.marketProbability) &&
-    isPrice(x.odd)
+    isPrice(x.odd) &&
+    (x.modelCheck === 'ok' || x.modelCheck === 'non vérifié')
   );
 }
 function validMarketCoupon(c) {
@@ -1038,11 +1043,13 @@ function validMarketCoupon(c) {
     c &&
     typeof c === 'object' &&
     c.size in COUPON_SIZES &&
+    c.bookmaker === 'bet365' &&
     Array.isArray(c.selections) &&
     c.selections.length === c.size &&
     isRatio(c.confidence) &&
     isPrice(c.combinedOdds) &&
-    c.selections.every(validMarketSelection)
+    c.selections.every(validMarketSelection) &&
+    new Set(c.selections.map((x) => x.matchId)).size === c.selections.length
   );
 }
 function couponValueTag(v) {
@@ -1058,9 +1065,15 @@ function couponAge(minutes) {
     'Cote relevée il y a ' + (m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min')
   );
 }
+function marketFairOdd(probability) {
+  return frOdd(1 / probability);
+}
+function marketValueFromOdds(probability, odd) {
+  return (odd * probability - 1) * 100;
+}
 function couponSelectionHTML(x) {
-  // Minimum arrondi vers le haut : un prix inférieur ne suffit pas.
-  const min = isPrice(x.minOdds) ? frOdd(Math.ceil(x.minOdds * 100) / 100) : null;
+  const fairOdd = marketFairOdd(x.marketProbability);
+  const valuePercent = marketValueFromOdds(x.marketProbability, x.odd);
   const agreed = x.modelCheck === 'ok';
   return (
     '<li class="mcpick"><div class="mcmatch"><b class="matchname" title="' +
@@ -1077,17 +1090,19 @@ function couponSelectionHTML(x) {
     frPercent(x.marketProbability) +
     '</dd></div><div><dt>Cote bet365</dt><dd>' +
     frOdd(x.odd) +
-    '</dd></div><div><dt>Cote minimum</dt><dd>' +
-    (min || 'indisponible') +
+    '</dd></div><div><dt>Cote juste du marché</dt><dd>' +
+    fairOdd +
     '</dd></div></dl><div class="mctags">' +
-    couponValueTag(x.valueVsMarket) +
+    couponValueTag(valuePercent / 100) +
     '<span class="tag ' +
     (agreed ? 'ok' : 'muted') +
     '">' +
     (agreed ? 'Modèle d’accord' : 'Non vérifié') +
     '</span></div><span class="oddsage">' +
     esc(couponAge(x.oddsAgeMinutes)) +
-    (min ? '' : ' · Ne joue pas sans cote minimum vérifiée.') +
+    ' · Joue seulement si la cote actuelle est ≥ ' +
+    fairOdd +
+    '.' +
     '</span></li>'
   );
 }
@@ -1133,6 +1148,11 @@ function marketCouponsState(state, d = {}) {
       '<p class="mcmsg"><strong>Coupons indisponibles pour cette analyse.</strong> ' +
       esc(d.summary || 'Le serveur n’a pas fourni de coupons.') +
       ' Aucun coupon n’est inventé.</p>';
+    return;
+  }
+  if (raw.length && !raw.some(validMarketCoupon)) {
+    box.innerHTML =
+      '<p class="mcmsg"><strong>Données de coupons invalides.</strong> La réponse du serveur ne respecte pas le contrat attendu ; aucun coupon n’est affiché.</p>';
     return;
   }
   const list = raw.filter(validMarketCoupon);

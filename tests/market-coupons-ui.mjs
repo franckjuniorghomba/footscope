@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
-// BIS-220 : section « Coupons du jour », rendue avec des réponses simulées de la forme fixée.
+
+// Fixture cohérente : six matchs distincts et confiance/cote combinées calculées par produit.
 const ui = await readFile('src/web/app.js', 'utf8');
 const box = { innerHTML: '' };
 const ctx = {
@@ -17,74 +18,96 @@ runInNewContext(
     ui.slice(ui.indexOf('// BIS-220'), ui.indexOf('function eventHTML(')),
   ctx,
 );
-const sel = (over = {}) => ({
-  matchId: 1,
-  match: 'Lyon — Nice',
-  kickoff: '2026-10-17T15:00:00Z',
-  market: 'Double chance',
-  selection: '1X',
-  marketProbability: 0.78,
-  modelProbability: 0.8,
-  modelCheck: 'ok',
-  odd: 1.3,
-  minOdds: 1.2821,
-  oddsAgeMinutes: 95,
-  valueVsMarket: 0.012,
-  ...over,
-});
-const coupon = (n, over = {}) => ({
-  id: 'c' + n,
-  size: n,
-  confidence: 0.6,
-  combinedOdds: 1.69,
-  bookmaker: 'bet365',
-  selections: Array.from({ length: n }, (_, i) => sel({ matchId: i })),
-  ...over,
-});
+
+const probabilities = [0.82, 0.82, 0.82];
+const fairOdds = probabilities.map((p) => 1 / p);
+const selections = probabilities.map((marketProbability, index) => ({
+  matchId: index + 1,
+  match: ['Club 1 — Visiteur 1', 'Club 2 — Visiteur 2', 'Club 3 — Visiteur 3'][index],
+  kickoff: `2030-01-0${index + 1}T14:00:00.000Z`,
+  market: 'Both Teams Score',
+  selection: 'Yes',
+  marketProbability,
+  modelProbability: null,
+  modelCheck: 'non vérifié',
+  odd: fairOdds[index],
+  minOdds: Math.ceil(fairOdds[index] * 100) / 100,
+  oddsAgeMinutes: 0,
+  valueVsMarket: 0,
+}));
+const makeCoupon = (size) => {
+  const picks = selections.slice(0, size);
+  return {
+    id: `fixture-${size}`,
+    size,
+    confidence: picks.reduce((product, x) => product * x.marketProbability, 1),
+    combinedOdds: picks.reduce((product, x) => product * x.odd, 1),
+    bookmaker: 'bet365',
+    selections: picks,
+  };
+};
 const render = (d) => (ctx.marketCouponsState('result', d), box.innerHTML);
-let html = render({ marketCoupons: [coupon(1), coupon(2), coupon(3)] });
+
+const validCoupons = [makeCoupon(1), makeCoupon(2), makeCoupon(3)];
+for (const coupon of validCoupons) {
+  const ids = coupon.selections.map((selection) => selection.matchId);
+  assert.equal(new Set(ids).size, ids.length, 'aucun match répété dans un coupon');
+  assert(coupon.confidence >= 0.5, 'confiance conforme au minimum');
+  assert.equal(
+    coupon.confidence,
+    coupon.selections.reduce((product, selection) => product * selection.marketProbability, 1),
+  );
+  assert.equal(
+    coupon.combinedOdds,
+    coupon.selections.reduce((product, selection) => product * selection.odd, 1),
+  );
+}
+assert(validCoupons[2].confidence >= 0.5, 'le triple reste au-dessus de 50 %');
+
+let html = render({ marketCoupons: validCoupons });
 assert.equal((html.match(/class="mcoupon"/g) || []).length, 3);
 assert.equal((html.match(/class="mcpick"/g) || []).length, 6);
-assert(html.includes('Confiance = probabilité du marché sans marge, non garantie.'));
-assert(html.includes('Triple · 3 événements') && html.includes('Simple · 1 événement<'));
-assert(html.includes('60,0 %') && html.includes('1,69'));
-assert(html.includes('1,29'), 'cote minimum arrondie vers le haut');
-assert(html.includes('Modèle d’accord') && html.includes('il y a 1 h 35 min'));
-assert(html.includes('Valeur face au marché +1,2 %'));
-html = render({
-  marketCoupons: [
-    coupon(1, {
-      selections: [sel({ modelCheck: 'non vérifié', valueVsMarket: null, minOdds: null })],
-    }),
-  ],
-});
-assert(html.includes('Non vérifié') && html.includes('Valeur face au marché : —'));
-assert(html.includes('Ne joue pas sans cote minimum vérifiée'));
-// Données invalides : écartées, jamais complétées.
-html = render({
-  marketCoupons: [
-    coupon(2, { selections: [sel()] }),
-    coupon(1, { confidence: 1.4 }),
-    { size: 4 },
-    null,
-  ],
-});
-assert(html.includes('Aucun coupon aujourd’hui'));
-assert(!html.includes('mcoupon'));
-// Vide : motif principal ; absent : indisponible, sans coupon inventé.
-assert(render({ marketCoupons: [] }).includes('entre 70 et 85'));
+assert(html.includes('Cote juste du marché'));
+assert(html.includes('Joue seulement si la cote actuelle est ≥'));
+assert(!html.includes('Cote minimum') && !html.includes('minOdds'));
+assert(html.includes('Cote bet365'));
+assert(html.includes('Sous la cote juste'), 'la cote bet365 brute est légèrement sous 1 / p');
+assert(html.includes('Non vérifié'));
+
+html = render({ marketCoupons: [makeCoupon(1)] });
+assert(html.includes('1,22'), 'cote juste affichée avec deux décimales');
+assert(html.includes('Club 1 — Visiteur 1'));
+
+// Les contrats incomplets ou trompeurs sont écartés, avec erreur visible si tout est mal formé.
+for (const invalid of [
+  { ...makeCoupon(1), bookmaker: 'pinnacle' },
+  {
+    ...makeCoupon(2),
+    selections: [selections[0], { ...selections[1], matchId: selections[0].matchId }],
+  },
+  { ...makeCoupon(1), selections: [{ ...selections[0], matchId: null }] },
+  { ...makeCoupon(1), selections: [{ ...selections[0], kickoff: 'invalid' }] },
+  { ...makeCoupon(1), selections: [{ ...selections[0], modelCheck: 'missing' }] },
+]) {
+  html = render({ marketCoupons: [invalid] });
+  assert(html.includes('Données de coupons invalides'));
+  assert(!html.includes('class="mcoupon"'));
+}
+
+html = render({ marketCoupons: [makeCoupon(1), { size: 9 }] });
+assert(html.includes('class="mcoupon"'), 'un coupon valide reste affiché');
+assert(render({ marketCoupons: [] }).includes('Aucun coupon aujourd’hui'));
+assert(render({ summary: 'Erreur réseau' }).includes('Coupons indisponibles'));
 assert(
   render({ marketCoupons: [], verdict: 'api_paused', summary: 'Quota atteint.' }).includes(
     'Quota atteint.',
   ),
 );
-assert(render({ summary: 'Erreur réseau' }).includes('Coupons indisponibles'));
-// Échappement HTML.
-assert(
-  !render({
-    marketCoupons: [coupon(1, { selections: [sel({ match: '<img onerror=1>' })] })],
-  }).includes('<img'),
-);
+assert(!render({ marketCoupons: [makeCoupon(1)] }).includes('<img'));
+html = render({ marketCoupons: [makeCoupon(1)] });
+assert(!html.includes('<img'), 'les textes sont échappés');
 ctx.marketCouponsState('loading');
 assert(box.innerHTML.includes('en cours'));
+ctx.marketCouponsState('idle');
+assert(box.innerHTML.includes('après l’analyse'));
 console.log('market coupons UI ok');
