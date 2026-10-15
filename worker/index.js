@@ -2,7 +2,7 @@ export { default } from '../src/server/app.js';
 export {
   reserveProviderSlot,
   providerLimitSeconds,
-  fixedDay,
+  ottawaDay,
   providerBase,
 } from '../src/server/provider.js';
 export { distribution, eventProbability, assessMatch } from '../src/server/statistics.js';

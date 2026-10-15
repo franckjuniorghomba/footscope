@@ -322,7 +322,7 @@ export async function universeJob(req, env, path, body, who) {
     const quotePath =
       job.quoteMode === 'fixtures'
         ? 'odds?fixture=' + day + '&page=' + page
-        : 'odds?date=' + day + '&timezone=Etc%2FGMT%2B5&page=' + page;
+        : 'odds?date=' + day + '&timezone=America%2FToronto&page=' + page;
     const d = await api(env, quotePath, 300000);
     const ids = new Set(job.fixtures.map((f) => f.fixture.id));
     for (const row of d.response || []) {

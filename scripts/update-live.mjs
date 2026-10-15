@@ -14,7 +14,7 @@ process.stdin.on('data', (chunk) => {
 async function main({ token, date }) {
   const base = 'https://foot-decision-franck.stablelily4.chatgpt.site';
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Etc/GMT+5',
+    timeZone: 'America/Toronto',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

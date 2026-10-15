@@ -99,7 +99,7 @@ assert(!JSON.stringify(cache.routes).includes(day));
 assert.deepEqual(Object.keys(cache.routes).sort(), [oddsRoute, 'status']);
 
 // Lecture depuis R2 (autre isolat) : succès de cache R2, sans requête.
-const path = 'odds?date=2026-10-15&timezone=Etc%2FGMT%2B5&page=2';
+const path = 'odds?date=2026-10-15&timezone=America%2FToronto&page=2';
 const key =
   'api-cache/' +
   Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(path))).toString(

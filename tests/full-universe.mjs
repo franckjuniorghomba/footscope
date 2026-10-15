@@ -9,7 +9,7 @@ const module = await import(
 const w = module.default;
 const now = Date.now(),
   kick = now + 3 * 3600000;
-const date = module.fixedDay(new Date(kick).toISOString());
+const date = module.ottawaDay(new Date(kick).toISOString());
 const rows = Array.from({ length: 21 }, (_, i) => ({
   fixture: {
     id: i + 1,
