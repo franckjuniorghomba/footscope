@@ -4,7 +4,7 @@ const esc = (x) =>
     /[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
   );
-const tz = 'Etc/GMT+5';
+const tz = 'America/Toronto';
 const dateParts = new Intl.DateTimeFormat('en-CA', {
   timeZone: tz,
   year: 'numeric',
@@ -46,7 +46,7 @@ function time(s) {
 function stamp(s) {
   return s ? new Date(s).toLocaleString('fr-CA', { timeZone: tz }) : 'Non renseignée';
 }
-// Format du design system : « Sam. 17 oct. · 10h00 », toujours en GMT−5.
+// Format du design system : « Sam. 17 oct. · 10h00 », à l’heure d’Ottawa.
 function kickoff(s) {
   if (!s) return '—';
   const day = new Date(s).toLocaleDateString('fr-FR', {

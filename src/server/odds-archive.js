@@ -1,5 +1,4 @@
 import { supportedMarkets } from './coupon.js';
-import { fixedDay } from './provider.js';
 
 // Historique des cotes (BIS-192) : chaque réponse `odds` réellement reçue du fournisseur est
 // archivée, un objet R2 par (match, relevé `update`). Aucun appel au fournisseur n'est ajouté,
@@ -77,9 +76,10 @@ function compactBookmaker(book) {
 
 // Clé ne dépendant que de (fixtureId, update) : le jour est celui du relevé en GMT−5 fixe, pour
 // qu'un coup d'envoi absent, déplacé ou corrigé ne crée jamais une deuxième écriture.
+// Partition historique conservée (BIS-223), indépendante des journées de l'application à Ottawa.
 export const archiveKey = (fixtureId, update) =>
   ARCHIVE_PREFIX +
-  fixedDay(update) +
+  new Date(Date.parse(update) - 5 * 3600000).toISOString().slice(0, 10) +
   '/' +
   fixtureId +
   '/' +
