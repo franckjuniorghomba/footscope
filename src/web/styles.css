@@ -179,8 +179,8 @@
   --radius-lg: 14px;
   --radius-pill: 999px;
   /* Ombres */
-  --shadow-panel: 0 24px 60px rgba(0, 0, 0, 0.45);
-  --glow-pitch: 0 0 24px rgba(152, 250, 95, 0.25);
+  --shadow-panel: none;
+  --glow-pitch: none;
   /* Mise en page */
   --gutter: var(--space-12);
   --page-max: 1280px;
@@ -1680,8 +1680,8 @@ footer.site {
   --caption: 400 14px/1.45 var(--font-sans);
   --shadow-panel: none;
   --glow-pitch: none;
-  --radius-md: 8px;
-  --radius-lg: 8px;
+  --radius-md: 0;
+  --radius-lg: 0;
 }
 :root[data-theme='dark'] {
   color-scheme: dark;
@@ -1940,4 +1940,42 @@ summary {
     font-size: 14px;
     padding: 8px 4px;
   }
+}
+
+/* Revue taste-skill BIS-222 : les données structurent la page, sans panneaux décoratifs. */
+.card,
+.detailhead,
+details.more {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.card {
+  padding: 24px 0;
+}
+.detailhead {
+  padding: 24px 0;
+}
+details.more summary {
+  padding-inline: 0;
+}
+details.more > :not(summary) {
+  margin-inline: 0;
+}
+.method .grid {
+  gap: 16px 40px;
+}
+.method .feature {
+  border-top: 1px solid var(--line);
+}
+.hero h1 {
+  max-width: 20ch;
+}
+.hero .lead {
+  max-width: 60ch;
+}
+.btn.primary:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--bg-900);
 }
