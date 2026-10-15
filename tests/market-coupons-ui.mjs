@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 
-// Fixture cohérente : six matchs distincts et confiance/cote combinées calculées par produit.
+// Six événements distincts répartis sans recouvrement entre les coupons.
 const ui = await readFile('src/web/app.js', 'utf8');
 const box = { innerHTML: '' };
 const ctx = {
@@ -21,22 +21,24 @@ runInNewContext(
 
 const probabilities = [0.82, 0.82, 0.82];
 const fairOdds = probabilities.map((p) => 1 / p);
-const selections = probabilities.map((marketProbability, index) => ({
+const selections = Array.from({ length: 6 }, (_, index) => ({
   matchId: index + 1,
-  match: ['Club 1 — Visiteur 1', 'Club 2 — Visiteur 2', 'Club 3 — Visiteur 3'][index],
+  match: `Club ${index + 1} — Visiteur ${index + 1}`,
   kickoff: `2030-01-0${index + 1}T14:00:00.000Z`,
   market: 'Both Teams Score',
   selection: 'Yes',
-  marketProbability,
+  marketProbability: probabilities[index % probabilities.length],
   modelProbability: null,
   modelCheck: 'non vérifié',
-  odd: fairOdds[index],
-  minOdds: Math.ceil(fairOdds[index] * 100) / 100,
+  odd: fairOdds[index % fairOdds.length],
+  fairOdds: fairOdds[index % fairOdds.length],
+  minOdds: Math.ceil(fairOdds[index % fairOdds.length] * 100) / 100,
   oddsAgeMinutes: 0,
-  valueVsMarket: 0,
+  valueVsMarket: -0.001,
 }));
 const makeCoupon = (size) => {
-  const picks = selections.slice(0, size);
+  const starts = { 1: 0, 2: 1, 3: 3 };
+  const picks = selections.slice(starts[size], starts[size] + size);
   return {
     id: `fixture-${size}`,
     size,
@@ -63,6 +65,12 @@ for (const coupon of validCoupons) {
   );
 }
 assert(validCoupons[2].confidence >= 0.5, 'le triple reste au-dessus de 50 %');
+assert.equal(
+  new Set(validCoupons.flatMap((coupon) => coupon.selections.map((selection) => selection.matchId)))
+    .size,
+  6,
+  'les six événements sont propres à leurs coupons et aucun ne se répète entre eux',
+);
 
 let html = render({ marketCoupons: validCoupons });
 assert.equal((html.match(/class="mcoupon"/g) || []).length, 3);
@@ -77,6 +85,33 @@ assert(html.includes('Non vérifié'));
 html = render({ marketCoupons: [makeCoupon(1)] });
 assert(html.includes('1,22'), 'cote juste affichée avec deux décimales');
 assert(html.includes('Club 1 — Visiteur 1'));
+
+// Le minimum est arrondi vers le haut ; fairOdds serveur prime sur 1/p.
+const edge = makeCoupon(1);
+edge.selections = [
+  {
+    ...selections[0],
+    marketProbability: 0.78,
+    fairOdds: 1.281,
+    odd: 1.281,
+    valueVsMarket: 0,
+  },
+];
+edge.confidence = 0.78;
+edge.combinedOdds = 1.281;
+html = render({ marketCoupons: [edge] });
+assert(html.includes('Cote juste du marché</dt><dd>1,28'));
+assert(html.includes('cote actuelle est ≥ 1.29'), 'seuil arrondi au centième supérieur');
+assert(html.includes('À la cote juste'), 'égalité serveur dans la tolérance affichée correctement');
+assert(!html.includes('−0,0 %'));
+
+// Une comparaison serveur explicitement indisponible garde son tiret et sa raison.
+edge.selections[0].valueVsMarket = null;
+edge.selections[0].valueReason = 'Repère trop ancien.';
+html = render({ marketCoupons: [edge] });
+assert(html.includes('Valeur face au marché : —'));
+assert(html.includes('Repère trop ancien.'));
+assert(!html.includes('Valeur face au marché +'));
 
 // Les contrats incomplets ou trompeurs sont écartés, avec erreur visible si tout est mal formé.
 for (const invalid of [

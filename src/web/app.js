@@ -1055,7 +1055,7 @@ function validMarketCoupon(c) {
 function couponValueTag(v) {
   if (!Number.isFinite(v)) return '<span class="tag muted">Valeur face au marché : —</span>';
   if (v > 0) return '<span class="tag ok">Valeur face au marché ' + signedPercent(v) + '</span>';
-  if (v === 0) return '<span class="tag muted">À la cote juste</span>';
+  if (Math.abs(v) <= 1e-9) return '<span class="tag muted">À la cote juste</span>';
   return '<span class="tag muted">Sous la cote juste ' + signedPercent(v) + '</span>';
 }
 function couponAge(minutes) {
@@ -1065,15 +1065,26 @@ function couponAge(minutes) {
     'Cote relevée il y a ' + (m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min')
   );
 }
-function marketFairOdd(probability) {
-  return frOdd(1 / probability);
+function couponFairOdd(x) {
+  return isPrice(x.fairOdds) ? x.fairOdds : 1 / x.marketProbability;
 }
-function marketValueFromOdds(probability, odd) {
-  return (odd * probability - 1) * 100;
+function couponValue(x) {
+  // `null` signifie que le serveur n'a pas pu établir une comparaison récente.
+  // Ne pas remplacer cette absence par un calcul à partir de la probabilité.
+  if (x.valueVsMarket === null) return null;
+  if (Number.isFinite(x.valueVsMarket)) return x.valueVsMarket;
+  return (x.odd * x.marketProbability - 1) * 100;
+}
+function couponValueReason(x) {
+  return typeof x.valueReason === 'string'
+    ? x.valueReason
+    : typeof x.reason === 'string'
+      ? x.reason
+      : '';
 }
 function couponSelectionHTML(x) {
-  const fairOdd = marketFairOdd(x.marketProbability);
-  const valuePercent = marketValueFromOdds(x.marketProbability, x.odd);
+  const fairOdd = frOdd(couponFairOdd(x));
+  const valuePercent = couponValue(x);
   const agreed = x.modelCheck === 'ok';
   return (
     '<li class="mcpick"><div class="mcmatch"><b class="matchname" title="' +
@@ -1093,7 +1104,10 @@ function couponSelectionHTML(x) {
     '</dd></div><div><dt>Cote juste du marché</dt><dd>' +
     fairOdd +
     '</dd></div></dl><div class="mctags">' +
-    couponValueTag(valuePercent / 100) +
+    couponValueTag(valuePercent === null ? NaN : valuePercent / 100) +
+    (valuePercent === null && couponValueReason(x)
+      ? '<small>' + esc(couponValueReason(x)) + '</small>'
+      : '') +
     '<span class="tag ' +
     (agreed ? 'ok' : 'muted') +
     '">' +
@@ -1101,7 +1115,7 @@ function couponSelectionHTML(x) {
     '</span></div><span class="oddsage">' +
     esc(couponAge(x.oddsAgeMinutes)) +
     ' · Joue seulement si la cote actuelle est ≥ ' +
-    fairOdd +
+    (Math.ceil(couponFairOdd(x) * 100) / 100).toFixed(2) +
     '.' +
     '</span></li>'
   );
