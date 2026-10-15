@@ -421,21 +421,30 @@ export async function api(env, path, ttl = 300000) {
   }
 }
 
-export function fixedDay(iso) {
-  return new Date(Date.parse(iso) - 5 * 3600000).toISOString().slice(0, 10);
+const ottawaDate = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Toronto',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+// Date civile d'Ottawa : aucune durée fixe de 24 h ni décalage constant les jours de transition.
+export function ottawaDay(iso) {
+  const parts = ottawaDate.formatToParts(new Date(iso));
+  const part = (type) => parts.find((p) => p.type === type).value;
+  return part('year') + '-' + part('month') + '-' + part('day');
 }
 export async function fixturesForDay(env, date) {
   const next = new Date(Date.parse(date + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10);
   const all = [];
   let retrievedAt;
   for (const day of [date, next]) {
-    const d = await api(env, 'fixtures?date=' + day + '&timezone=Etc%2FGMT%2B5', 300000);
+    const d = await api(env, 'fixtures?date=' + day + '&timezone=America%2FToronto', 300000);
     all.push(...d.response);
     retrievedAt = d.retrievedAt;
   }
   const response = [
     ...new Map(
-      all.filter((f) => fixedDay(f.fixture.date) === date).map((f) => [f.fixture.id, f]),
+      all.filter((f) => ottawaDay(f.fixture.date) === date).map((f) => [f.fixture.id, f]),
     ).values(),
   ];
   return { response, results: response.length, paging: { current: 1, total: 1 }, retrievedAt };

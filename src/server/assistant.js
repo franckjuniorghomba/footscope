@@ -1,4 +1,4 @@
-import { fixedDay, fixturesForDay } from './provider.js';
+import { ottawaDay, fixturesForDay } from './provider.js';
 import { POLICY, MODEL_VERSION } from './policy.js';
 import { json } from './http.js';
 import { putJob, universeJob } from './jobs.js';
@@ -263,7 +263,7 @@ export async function assistant(req, env, path) {
         (!scope.country || r.country === scope.country) &&
         (!scope.league || r.league === scope.league) &&
         (!scope.search || r.match.toLowerCase().includes(String(scope.search).toLowerCase())) &&
-        fixedDay(r.kickoff) === scope.date,
+        ottawaDay(r.kickoff) === scope.date,
     );
     for (const report of allowed) {
       const candidates = report.events

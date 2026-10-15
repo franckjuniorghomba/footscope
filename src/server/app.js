@@ -69,7 +69,7 @@ export default {
           (u.pathname === '/api/fixtures' ? 'fixtures' : 'odds') +
           '?date=' +
           date +
-          '&timezone=Etc%2FGMT%2B5';
+          '&timezone=America%2FToronto';
         if (u.pathname === '/api/odds') {
           const n = Number(u.searchParams.get('page') || 1);
           if (!Number.isInteger(n) || n < 1 || n > 100)

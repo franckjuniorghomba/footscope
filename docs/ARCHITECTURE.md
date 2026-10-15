@@ -4,7 +4,7 @@ L’exécution publique est un Cloudflare Worker. Node.js sert au développement
 
 ## Parcours d’une proposition
 
-1. `assistant.js` crée une analyse avec tous les matchs à venir correspondant à la date GMT−5 et aux filtres.
+1. `assistant.js` crée une analyse avec tous les matchs à venir correspondant à la date civile d’Ottawa (`America/Toronto`, heure d’été/hiver comprise) et aux filtres.
 2. `jobs.js` parcourt les cotes paginées. Pour vingt matchs ou moins, il collecte les cotes par match ; pour un périmètre plus large, il parcourt les deux dates UTC nécessaires.
 3. Chaque match reçoit soit un motif d’exclusion, soit une analyse approfondie de ses preuves.
 4. `statistics.js` estime les événements pris en charge et applique `policy.js`.
@@ -12,6 +12,12 @@ L’exécution publique est un Cloudflare Worker. Node.js sert au développement
 6. Les matchs envisagés sont revérifiés. Aucun coupon complet n’est présenté tant qu’il manque des examens.
 7. `assistant.js` transmet les probabilités combinées prudente et exploratoire, le seuil et les candidats dont l’ajout ferait passer sous le seuil. `llm.js` explique pourquoi ces sélections et pourquoi pas plus, sans inventer de chiffres ni changer le ticket ou le statut. Le prompt et la projection de l’entrée sont partagés avec `jobs.js` pour conserver exactement la requête dans le dossier de preuves. Le repère descriptif `market` sans marge est exclu de l’entrée ; les noms textuels des marchés sont conservés. Sans LLM disponible, le résumé rappelle la probabilité prudente combinée et le caractère non validé du modèle.
 8. La proposition fige `ticketProbability`, `combinedProbability = ticketProbability` et `modelVersion = MODEL_VERSION` dans l’observation. `storage.js` conserve les propositions et permet le relevé des résultats ; le suivi par ticket compare la probabilité annoncée enregistrée à l’observé sans la recalculer.
+
+## Journées et heures (BIS-223)
+
+`ottawaDay` dans `provider.js` définit la date civile en `America/Toronto` pour le filtrage des rencontres et la proposition des tickets et coupons du jour. L’interface et les appels fournisseur utilisent le même fuseau. Le 1er novembre 2026 contient 25 heures, le 8 mars 23 heures : le filtrage compare des dates civiles, sans imposer une durée de 24 heures. Le calcul de la date suivante à midi UTC sert seulement à énumérer les deux dates de collecte existantes et conserve leur couverture exhaustive.
+
+L’export testable du Worker `fixedDay` est renommé `ottawaDay` pour rendre le nouveau contrat explicite. L’archive des cotes conserve son partitionnement historique fixe (voir `ODDS-ARCHIVE.md`) ; le banc `scripts/backtest` conserve son fuseau pour la reproductibilité.
 
 ## Données et isolation
 

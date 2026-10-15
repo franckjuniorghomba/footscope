@@ -6,8 +6,8 @@ const source = fs
   .replace(/(?:var|const) API_SPACING_MS\s*=\s*6500\s*;/, 'var API_SPACING_MS = 0;');
 const mod = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
 const w = mod.default;
-assert.equal(mod.fixedDay('2026-10-13T02:00:00Z'), '2026-10-12');
-assert.equal(mod.fixedDay('2026-10-13T05:00:00Z'), '2026-10-13');
+assert.equal(mod.ottawaDay('2026-10-13T02:00:00Z'), '2026-10-12');
+assert.equal(mod.ottawaDay('2026-10-13T05:00:00Z'), '2026-10-13');
 const now = Date.now();
 const game = (id, home, away, gf, ga, at) => ({
   fixture: {
@@ -272,7 +272,7 @@ assert.equal(
   null,
   'Une sélection absente ne reprend jamais l’heure client',
 );
-const date = new Date(Date.parse(target.fixture.date) - 5 * 3600000).toISOString().slice(0, 10);
+const date = mod.ottawaDay(target.fixture.date);
 const proposed = await (
   await call('propose', { tokens: [scanned.token], scope: { date }, eligibleCount: 1 })
 ).json();

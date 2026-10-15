@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { ottawaDay } from '../src/server/provider.js';
 import {
   ARCHIVE_MAX_BYTES,
   archiveMetrics,
@@ -34,7 +35,7 @@ const secret = 'mock-key-0123456789abcdef';
 const now = Date.now(),
   kick = now + 3 * 3600000;
 const fixedDay = (iso) => new Date(Date.parse(iso) - 5 * 3600000).toISOString().slice(0, 10);
-const date = fixedDay(new Date(kick).toISOString());
+const date = ottawaDay(new Date(kick).toISOString());
 const T1 = new Date(now - 120000).toISOString(),
   T2 = new Date(now - 60000).toISOString();
 const rows = [1, 2].map((id, i) => ({

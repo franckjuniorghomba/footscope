@@ -4,7 +4,35 @@ const esc = (x) =>
     /[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
   );
-const tz = 'Etc/GMT+5';
+// BIS-222 : la préférence explicite prime ; le système reste suivi sans choix enregistré.
+function initTheme() {
+  const button = $('#themeToggle');
+  if (!button || typeof window === 'undefined' || !window.matchMedia) return;
+  const system = window.matchMedia('(prefers-color-scheme: dark)');
+  let choice = null;
+  try {
+    const saved = localStorage.getItem('footscope-theme');
+    if (saved === 'light' || saved === 'dark') choice = saved;
+  } catch {}
+  const apply = () => {
+    const dark = choice ? choice === 'dark' : system.matches;
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    button.setAttribute('aria-pressed', String(dark));
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = dark ? '#101916' : '#f5f4ef';
+  };
+  button.addEventListener('click', () => {
+    choice = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    try {
+      localStorage.setItem('footscope-theme', choice);
+    } catch {}
+    apply();
+  });
+  system.addEventListener('change', apply);
+  apply();
+}
+initTheme();
+const tz = 'America/Toronto';
 const dateParts = new Intl.DateTimeFormat('en-CA', {
   timeZone: tz,
   year: 'numeric',
@@ -46,7 +74,7 @@ function time(s) {
 function stamp(s) {
   return s ? new Date(s).toLocaleString('fr-CA', { timeZone: tz }) : 'Non renseignée';
 }
-// Format du design system : « Sam. 17 oct. · 10h00 », toujours en GMT−5.
+// Format du design system : « Sam. 17 oct. · 10h00 », à l’heure d’Ottawa.
 function kickoff(s) {
   if (!s) return '—';
   const day = new Date(s).toLocaleDateString('fr-FR', {
@@ -340,7 +368,47 @@ function filterChanged() {
   render();
 }
 $('#refresh').onclick = () => load();
-$('#date').onchange = () => load();
+function renderDateStrip() {
+  const strip = $('#dateStrip');
+  if (!strip) return;
+  const selected = $('#date').value;
+  const anchor = new Date(selected + 'T12:00:00Z');
+  if (!Number.isFinite(anchor.getTime())) return;
+  strip.innerHTML = Array.from({ length: 5 }, (_, index) => {
+    const date = new Date(anchor);
+    date.setUTCDate(date.getUTCDate() + index - 2);
+    const value = date.toISOString().slice(0, 10);
+    const label = date.toLocaleDateString('fr-CA', {
+      timeZone: tz,
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
+    return (
+      '<button type="button" data-date="' +
+      value +
+      '"' +
+      (value === selected ? ' aria-current="date"' : '') +
+      '>' +
+      esc(label) +
+      '</button>'
+    );
+  }).join('');
+  strip.onclick = (event) => {
+    const button = event.target.closest('[data-date]');
+    if (!button || typeof window === 'undefined' || !window.matchMedia) return;
+    $('#date').value = button.dataset.date;
+    renderDateStrip();
+    load();
+    // Conserver le focus sur la date choisie après reconstruction du bandeau.
+    strip.querySelector('[aria-current="date"]').focus();
+  };
+}
+renderDateStrip();
+$('#date').onchange = () => {
+  renderDateStrip();
+  load();
+};
 $('#search').oninput = filterChanged;
 $('#country').onchange = () => {
   updateLeagues();
