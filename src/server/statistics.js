@@ -158,6 +158,21 @@ export function assessMatch(d, now = Date.now()) {
     retrievedAt: d.retrievedAt,
     modelVersion: MODEL_VERSION,
     modelValidated: false,
+    // Données serveur séparées des événements admissibles au ticket et des preuves.
+    marketCouponQuotes: (d.odds || []).map((r) => ({
+      fixture: { id: r.fixture?.id ?? f.fixture.id },
+      update: r.update,
+      bookmakers: (r.bookmakers || []).map((b) => ({
+        name: b.name,
+        bets: (b.bets || [])
+          .filter((m) =>
+            ['Match Winner', 'Double Chance', 'Goals Over/Under', 'Both Teams Score'].includes(
+              m.name,
+            ),
+          )
+          .map((m) => ({ name: m.name, values: m.values })),
+      })),
+    })),
     market: marketReference(d.odds, now),
     // BIS-200 : repère Pinnacle brut, jugé frais ou non au moment de la comparaison.
     sharpReference: sharpReference(d.odds, f.fixture.id),

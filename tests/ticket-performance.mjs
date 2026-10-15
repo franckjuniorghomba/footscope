@@ -147,6 +147,7 @@ assert.deepEqual(Object.keys(full), [
   'sampleWarning',
   'sampleWarningText',
   'tickets',
+  'marketCoupons',
   'modelValidated',
   'scope',
 ]);

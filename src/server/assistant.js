@@ -5,7 +5,8 @@ import { putJob, universeJob } from './jobs.js';
 import { scan } from './evidence.js';
 import { BELOW_THRESHOLD_REASON, selectCouponDetailed } from './coupon.js';
 import { llmExplanation, statisticalSummary } from './llm.js';
-import { settle } from './storage.js';
+import { settle, marketCouponObservations } from './storage.js';
+import { buildMarketCoupons } from './market-coupons.js';
 import { marketValueSummary } from './market.js';
 
 // Clé de scellement dédiée, dérivée de API_FOOTBALL_KEY par HKDF-SHA-256 : la clé du
@@ -251,7 +252,8 @@ export async function assistant(req, env, path) {
     ticket = null,
     excludedCandidates = [],
     excludedCandidatesCount = 0,
-    excludedEvents = [];
+    excludedEvents = [],
+    marketCoupons = [];
   // Événements serveur seulement, pour la valeur face au marché (jamais l'entrée du client).
   const reviewedEvents = [];
   const scope = preparedJob?.scope || body.scope || {};
@@ -287,6 +289,7 @@ export async function assistant(req, env, path) {
     }
     const now = Date.now();
     ticket = selectCouponDetailed(allowed, now);
+    marketCoupons = buildMarketCoupons(allowed, now);
     const excluded = thresholdExcludedCandidates(allowed, ticket, now);
     excludedCandidates = excluded.candidates;
     excludedCandidatesCount = excluded.count;
@@ -345,6 +348,7 @@ export async function assistant(req, env, path) {
         : 'simulation_eligible';
   const result = {
     verdict,
+    marketCoupons,
     selections,
     reviews,
     blockers,
@@ -418,7 +422,13 @@ export async function assistant(req, env, path) {
     risks: [...result.risks, ...(explanation.risks || [])],
   };
   if (proposing && env.BUCKET) {
-    const record = { ...final, id: crypto.randomUUID(), outcomes: [], settled: false };
+    const record = {
+      ...final,
+      id: crypto.randomUUID(),
+      outcomes: [],
+      settled: false,
+      marketCouponTracking: marketCouponObservations(marketCoupons, final.generatedAt),
+    };
     await env.BUCKET.put(
       'observations/' + record.generatedAt.slice(0, 10) + '/' + record.id + '.json',
       JSON.stringify(record),
