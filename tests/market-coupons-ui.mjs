@@ -105,6 +105,11 @@ assert(html.includes('cote actuelle est ≥ 1.29'), 'seuil arrondi au centième 
 assert(html.includes('À la cote juste'), 'égalité serveur dans la tolérance affichée correctement');
 assert(!html.includes('−0,0 %'));
 
+edge.selections[0].fairOdds = 1.3;
+html = render({ marketCoupons: [edge] });
+assert(html.includes('Cote juste du marché</dt><dd>1,30'));
+assert(html.includes('cote actuelle est ≥ 1.30'));
+
 // Une comparaison serveur explicitement indisponible garde son tiret et sa raison.
 edge.selections[0].valueVsMarket = null;
 edge.selections[0].valueReason = 'Repère trop ancien.';
