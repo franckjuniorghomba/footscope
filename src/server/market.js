@@ -14,12 +14,16 @@ const fresh = (updated, now) => {
 
 // Repère descriptif seulement : les trois issues doivent provenir du même
 // relevé/bookmaker. Jamais de regroupement, ni de normalisation Double Chance.
-export function marketReference(records, now = Date.now()) {
+export function marketReference(
+  records,
+  now = Date.now(),
+  maxOddsAgeMs = POLICY.maxMarketOddsAgeMs,
+) {
   const references = [];
   if (!Array.isArray(records) || !Number.isFinite(now)) return references;
   for (const record of records) {
     const age = typeof record?.update === 'string' ? now - Date.parse(record.update) : NaN;
-    if (!Number.isFinite(age) || age < -300000 || age > POLICY.maxMarketOddsAgeMs) continue;
+    if (!Number.isFinite(age) || age < -300000 || age > maxOddsAgeMs) continue;
     if (!Array.isArray(record.bookmakers)) continue;
     for (const book of record.bookmakers) {
       if (typeof book?.name !== 'string' || !book.name.trim() || !Array.isArray(book.bets))
@@ -130,7 +134,13 @@ function twoWay(bet, first, second) {
 // Probabilité juste Pinnacle d'une sélection : 1X2 par marketReference (BIS-172),
 // double chance comme somme de deux issues 1X2 justes (jamais normalisée directement),
 // plus/moins et « les deux marquent » normalisés à deux issues. undefined : non pris en charge.
-function fairProbability(reference, market, selection, now) {
+export function fairProbability(
+  reference,
+  market,
+  selection,
+  now,
+  maxOddsAgeMs = POLICY.maxMarketOddsAgeMs,
+) {
   const bets = (name) => reference.bets.filter((m) => m.name === name);
   const single = (name) => (bets(name).length === 1 ? bets(name)[0] : null);
   if (market === 'Match Winner' || market === 'Double Chance') {
@@ -141,6 +151,7 @@ function fairProbability(reference, market, selection, now) {
     const [ref] = marketReference(
       [{ update: reference.updated, bookmakers: [{ name: reference.bookmaker, bets: [winner] }] }],
       now,
+      maxOddsAgeMs,
     );
     return ref ? sides.reduce((sum, x) => sum + ref.probabilities[x], 0) : null;
   }

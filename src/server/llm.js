@@ -16,6 +16,9 @@ export function buildLlmInput(result) {
     'evidence',
     'reports',
     'market',
+    'marketCoupons',
+    'marketCouponQuotes',
+    'marketCouponTracking',
   ]);
   const input = Object.fromEntries(Object.entries(result).filter(([key]) => !excluded.has(key)));
   for (const field of ['selections', 'reviews', 'excludedCandidates'])

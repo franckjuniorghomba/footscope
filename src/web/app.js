@@ -336,6 +336,7 @@ function filterChanged() {
   $('#details').classList.add('hidden');
   $('#program').classList.remove('hidden');
   $('#assistantResult').classList.add('hidden');
+  marketCouponsState('idle');
   render();
 }
 $('#refresh').onclick = () => load();
@@ -1012,6 +1013,178 @@ function oddsWarningHTML(x) {
     '</p>'
   );
 }
+// BIS-220 : « Coupons du jour » selon le marché. Le serveur fournit `marketCoupons` ; rien n'est
+// recalculé ici et toute donnée qui n'a pas la forme attendue est écartée, jamais complétée.
+const COUPON_SIZES = { 1: 'Simple', 2: 'Double', 3: 'Triple' };
+const COUPON_WARNING =
+  'Confiance = probabilité du marché sans marge, non garantie. Vérifie la cote actuelle chez le bookmaker.';
+const isRatio = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
+const isPrice = (v) => typeof v === 'number' && Number.isFinite(v) && v > 1;
+const frPercent = (v) =>
+  (v * 100).toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' %';
+const frOdd = (v) =>
+  v.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function validMarketSelection(x) {
+  return (
+    x &&
+    typeof x === 'object' &&
+    (typeof x.matchId === 'string' ||
+      (typeof x.matchId === 'number' && Number.isFinite(x.matchId))) &&
+    ['match', 'market', 'selection'].every((k) => typeof x[k] === 'string' && x[k]) &&
+    typeof x.kickoff === 'string' &&
+    Number.isFinite(Date.parse(x.kickoff)) &&
+    isRatio(x.marketProbability) &&
+    isPrice(x.odd) &&
+    (x.modelCheck === 'ok' || x.modelCheck === 'non vérifié')
+  );
+}
+function validMarketCoupon(c) {
+  return (
+    c &&
+    typeof c === 'object' &&
+    c.size in COUPON_SIZES &&
+    c.bookmaker === 'bet365' &&
+    Array.isArray(c.selections) &&
+    c.selections.length === c.size &&
+    isRatio(c.confidence) &&
+    isPrice(c.combinedOdds) &&
+    c.selections.every(validMarketSelection) &&
+    new Set(c.selections.map((x) => x.matchId)).size === c.selections.length
+  );
+}
+function couponValueTag(v) {
+  if (!Number.isFinite(v)) return '<span class="tag muted">Valeur face au marché : —</span>';
+  if (v > 0) return '<span class="tag ok">Valeur face au marché ' + signedPercent(v) + '</span>';
+  if (Math.abs(v) <= 1e-9) return '<span class="tag muted">À la cote juste</span>';
+  return '<span class="tag muted">Sous la cote juste ' + signedPercent(v) + '</span>';
+}
+function couponAge(minutes) {
+  if (!Number.isFinite(minutes) || minutes < 0) return 'Âge de la cote indisponible';
+  const m = Math.floor(minutes);
+  return (
+    'Cote relevée il y a ' + (m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min')
+  );
+}
+function couponFairOdd(x) {
+  return isPrice(x.fairOdds) ? x.fairOdds : 1 / x.marketProbability;
+}
+function couponValue(x) {
+  // `null` signifie que le serveur n'a pas pu établir une comparaison récente.
+  // Ne pas remplacer cette absence par un calcul à partir de la probabilité.
+  if (x.valueVsMarket === null) return null;
+  if (Number.isFinite(x.valueVsMarket)) return x.valueVsMarket;
+  return (x.odd * x.marketProbability - 1) * 100;
+}
+function couponValueReason(x) {
+  return typeof x.valueReason === 'string'
+    ? x.valueReason
+    : typeof x.reason === 'string'
+      ? x.reason
+      : '';
+}
+function couponSelectionHTML(x) {
+  const fairOdd = frOdd(couponFairOdd(x));
+  const valuePercent = couponValue(x);
+  const agreed = x.modelCheck === 'ok';
+  return (
+    '<li class="mcpick"><div class="mcmatch"><b class="matchname" title="' +
+    esc(x.match) +
+    '">' +
+    esc(x.match) +
+    '</b><span class="meta">' +
+    kickoff(x.kickoff) +
+    '</span></div><p class="mcbet">' +
+    esc(x.market) +
+    ' · <strong>' +
+    esc(x.selection) +
+    '</strong></p><dl class="mcfacts"><div><dt>Probabilité du marché</dt><dd>' +
+    frPercent(x.marketProbability) +
+    '</dd></div><div><dt>Cote bet365</dt><dd>' +
+    frOdd(x.odd) +
+    '</dd></div><div><dt>Cote juste du marché</dt><dd>' +
+    fairOdd +
+    '</dd></div></dl><div class="mctags">' +
+    couponValueTag(valuePercent === null ? NaN : valuePercent / 100) +
+    (valuePercent === null && couponValueReason(x)
+      ? '<small>' + esc(couponValueReason(x)) + '</small>'
+      : '') +
+    '<span class="tag ' +
+    (agreed ? 'ok' : 'muted') +
+    '">' +
+    (agreed ? 'Modèle d’accord' : 'Non vérifié') +
+    '</span></div><span class="oddsage">' +
+    esc(couponAge(x.oddsAgeMinutes)) +
+    ' · Joue seulement si la cote actuelle est ≥ ' +
+    (Math.ceil(couponFairOdd(x) * 100) / 100).toFixed(2) +
+    '.' +
+    '</span></li>'
+  );
+}
+function marketCouponHTML(c, index) {
+  const id = 'mc' + index;
+  return (
+    '<article class="mcoupon" aria-labelledby="' +
+    id +
+    '"><header class="mchead"><div><h3 id="' +
+    id +
+    '">Coupon ' +
+    (index + 1) +
+    '</h3><span class="meta">' +
+    COUPON_SIZES[c.size] +
+    ' · ' +
+    c.size +
+    (c.size > 1 ? ' événements' : ' événement') +
+    '</span></div><dl class="mctotals"><div><dt>Confiance</dt><dd class="prob">' +
+    frPercent(c.confidence) +
+    '</dd></div><div><dt>Cote combinée bet365</dt><dd>' +
+    frOdd(c.combinedOdds) +
+    '</dd></div></dl></header><ol class="mcpicks">' +
+    c.selections.map(couponSelectionHTML).join('') +
+    '</ol></article>'
+  );
+}
+// États : attente, chargement, erreur (pas de champ), vide (motif) et succès.
+function marketCouponsState(state, d = {}) {
+  const box = $('#marketCoupons');
+  if (!box) return;
+  if (state === 'loading') {
+    box.innerHTML = '<p class="mcmsg">Calcul des coupons du jour en cours…</p>';
+    return;
+  }
+  if (state === 'idle') {
+    box.innerHTML =
+      '<p class="mcmsg">Les coupons du jour apparaissent ici après l’analyse des matchs filtrés.</p>';
+    return;
+  }
+  const raw = d.marketCoupons;
+  if (!Array.isArray(raw)) {
+    box.innerHTML =
+      '<p class="mcmsg"><strong>Coupons indisponibles pour cette analyse.</strong> ' +
+      esc(d.summary || 'Le serveur n’a pas fourni de coupons.') +
+      ' Aucun coupon n’est inventé.</p>';
+    return;
+  }
+  if (raw.length && !raw.some(validMarketCoupon)) {
+    box.innerHTML =
+      '<p class="mcmsg"><strong>Données de coupons invalides.</strong> La réponse du serveur ne respecte pas le contrat attendu ; aucun coupon n’est affiché.</p>';
+    return;
+  }
+  const list = raw.filter(validMarketCoupon);
+  if (!list.length) {
+    box.innerHTML =
+      '<p class="mcmsg"><strong>Aucun coupon aujourd’hui.</strong> ' +
+      (d.verdict === 'api_paused' || d.verdict === 'insufficient'
+        ? esc(d.summary || '')
+        : 'Aucun événement ne réunit une probabilité de marché entre 70 et 85 %, une cote bet365 relevée il y a moins de 24 h et un coupon d’au moins 50 % de confiance.') +
+      ' Ne pas jouer reste une issue normale.</p>';
+    return;
+  }
+  box.innerHTML =
+    '<p class="note mcwarn" role="note">' +
+    esc(COUPON_WARNING) +
+    '</p>' +
+    list.map(marketCouponHTML).join('');
+}
 function eventHTML(x, market, role, index) {
   return (
     '<div class="eventitem"><b>' +
@@ -1106,6 +1279,7 @@ function candidatesHTML(market) {
 // Le ticket du jour : sélections, bookmaker, cote combinée et, si l'API la fournit,
 // la probabilité combinée (ticketProbability). Rien n'est recalculé ici.
 function showAssistant(d) {
+  marketCouponsState('result', d);
   const box = $('#assistantResult');
   box.classList.remove('hidden');
   const picks = d.selections || [],
@@ -1245,6 +1419,7 @@ $('#propose').onclick = async () => {
   };
   const gen = generation;
   busy(true);
+  marketCouponsState('loading');
   $('#assistantResult').classList.remove('hidden');
   $('#assistantResult').textContent = 'Recherche de tous les matchs à venir…';
   try {
