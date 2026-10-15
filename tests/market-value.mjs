@@ -152,9 +152,9 @@ for (const mutate of [
   mutate(reference);
   refused(bet('Both Teams Score', 'Yes', 1.9), reference, 'INCOMPLETE_MARKET');
 }
-// BIS-217 : badge toujours à 30 min malgré l’admission à 3 h.
-refused({ ...mw, updated: at(-179 * 60000) }, pinnacle(), 'STALE_QUOTE');
-refused(mw, pinnacle({ updated: at(-179 * 60000) }), 'STALE_REFERENCE');
+// BIS-217 : badge toujours à 30 min malgré l’admission à 24 h.
+refused({ ...mw, updated: at(-1439 * 60000) }, pinnacle(), 'STALE_QUOTE');
+refused(mw, pinnacle({ updated: at(-1439 * 60000) }), 'STALE_REFERENCE');
 
 // Bornes propres au repère descriptif : 30 minutes, futur toléré 5 minutes.
 for (const offset of [-POLICY.maxMarketOddsAgeMs, 300000])
@@ -533,9 +533,9 @@ runInNewContext(
   ctx,
 );
 runInNewContext(ui.slice(ui.indexOf('function fresh('), ui.indexOf('async function get(')), ctx);
-assert.equal(ctx.fresh(at(-179 * 60000)), true);
-assert.equal(ctx.fresh(at(-180 * 60000)), true);
-assert.equal(ctx.fresh(at(-181 * 60000)), false);
+assert.equal(ctx.fresh(at(-1439 * 60000)), true);
+assert.equal(ctx.fresh(at(-1440 * 60000)), true);
+assert.equal(ctx.fresh(at(-1441 * 60000)), false);
 assert.equal(ctx.fresh('invalid'), false);
 const render = (d) => {
   ctx.showAssistant(d);
@@ -547,13 +547,64 @@ let html = render(many);
 assert.equal(count(html, /class="valuebadge"/g), 2 + 2 + 7);
 assert(html.includes('Candidats écartés (7)'));
 assert.equal(count(html, /class="oddsage"/g), 2 + 2 + 7);
-assert.equal(ctx.oddsAge(at(-179 * 60000)), 'cote mise à jour il y a 2 h 59 min');
+assert.equal(ctx.oddsAge(at(-1439 * 60000)), 'cote mise à jour il y a 23 h 59 min');
 assert.equal(ctx.oddsAge(at(-59000)), 'cote mise à jour il y a 0 min');
 assert.equal(ctx.oddsAge(undefined), 'Âge de la cote indisponible');
 assert.equal(ctx.oddsAge('invalid'), 'Âge de la cote indisponible');
 assert.equal(ctx.oddsAge(at(60000)), 'Horodatage de la cote dans le futur');
+const warning =
+  'Vérifie la cote actuelle chez le bookmaker : ne joue que si elle est au moins égale à la cote minimum affichée.';
+assert.equal(
+  count(html, /class="note oddsnotice"/g),
+  4,
+  'Avertissement dans le ticket et chaque détail',
+);
+for (const renderSelection of [ctx.pickHTML, ctx.eventHTML]) {
+  const selectionHtml = renderSelection({
+    ...event(7),
+    minOdds: 1.234,
+    updated: at(-1439 * 60000),
+  });
+  assert(selectionHtml.includes('Cote relevée il y a 23 h 59 min.'));
+  assert(selectionHtml.includes(warning));
+  assert(selectionHtml.includes('Cote minimum : <strong>1.24</strong>'));
+}
+for (const updated of [undefined, 'invalid', at(60000)]) {
+  const warningHtml = ctx.oddsWarningHTML({ updated });
+  assert(warningHtml.includes(ctx.oddsAge(updated)));
+  assert(warningHtml.includes('Cote minimum : <strong>indisponible</strong>'));
+  assert(warningHtml.includes('Ne joue pas sans cote minimum vérifiée.'));
+}
 for (const id of [9, 10, 11, 12, 13, 14, 15]) assert(html.includes('Club ' + id + ' — '), id);
 assert(html.includes('Pas de repère Pinnacle'), 'Raison du candidat sans repère');
+
+// Copier le ticket conserve minOdds dans le coupon et son avertissement.
+const couponNodes = new Map();
+ctx.$ = (q) => {
+  if (q === '#assistantResult') return box;
+  if (!couponNodes.has(q)) couponNodes.set(q, { value: '1', textContent: '', innerHTML: '' });
+  return couponNodes.get(q);
+};
+ctx.coupon = [];
+ctx.ticketCopy = null;
+ctx.toast = () => {};
+runInNewContext(
+  ui.slice(ui.indexOf('function renderCoupon('), ui.indexOf("$('#couponItems').onclick")),
+  ctx,
+);
+const copyData = {
+  ...many,
+  selections: many.selections.map((x) => ({ ...x, minOdds: 1.234, updated: at(-1439 * 60000) })),
+};
+ctx.showAssistant(copyData);
+couponNodes.get('#useProposal').onclick();
+assert.equal(ctx.coupon[0].minOdds, 1.234);
+const couponHtml = couponNodes.get('#couponItems').innerHTML;
+assert.equal(count(couponHtml, /class="note oddsnotice"/g), copyData.selections.length);
+assert(couponHtml.includes(warning));
+assert(couponHtml.includes('Cote relevée il y a 23 h 59 min.'));
+assert(couponHtml.includes('Cote minimum : <strong>1.24</strong>'));
+ctx.$ = (q) => (q === '#assistantResult' ? box : null);
 
 // Sans ticket : tous les candidats sous le seuil, rendus avec badge ou raison.
 const noTicketUniverse = [

@@ -456,7 +456,7 @@ export async function universeJob(req, env, path, body, who) {
       );
       code = 'NO_ODDS_AFTER_COMPLETE_COVERAGE';
     } else if (!supportedQuotes(odds)) {
-      report = blockedReport(f, 'Aucun marché modélisé avec une cote datant d’au plus 3 heures.');
+      report = blockedReport(f, 'Aucun marché modélisé avec une cote datant d’au plus 24 heures.');
       code = 'NO_SUPPORTED_FRESH_QUOTES';
     } else {
       data = await evidence(env, f.fixture.id, {

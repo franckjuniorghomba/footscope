@@ -92,7 +92,7 @@ export function assessMatch(d, now = Date.now()) {
           const reasons = [...common],
             age = now - Date.parse(record.update);
           if (!Number.isFinite(age) || age < -300000 || age > POLICY.maxOddsAgeMs)
-            reasons.push('Cote absente, future ou âgée de plus de 3 heures.');
+            reasons.push('Cote absente, future ou âgée de plus de 24 heures.');
           if (p === null) reasons.push('Marché non modélisé : aucune validation automatique.');
           // Sensitivity envelope, NOT a calibrated confidence interval.
           let prudent = null;
@@ -306,10 +306,10 @@ assert.equal(refused.events.length, 70);
 assert.equal(refused.events.filter((event) => event.status === 'insufficient').length, 30);
 assert.deepStrictEqual(before.calls, { probability: 430, distribution: 860 });
 assert.deepStrictEqual(after.calls, { probability: 43, distribution: 6 });
-// BIS-217 : conserver un relevé périmé dans le scénario mixte, désormais à 3 h 01.
+// BIS-217 : conserver un relevé périmé dans le scénario mixte, désormais à 24 h 01.
 const records = fixture();
 records.odds.push(structuredClone(records.odds[0]));
-records.odds[1].update = new Date(now - 181 * 60000).toISOString();
+records.odds[1].update = new Date(now - 1441 * 60000).toISOString();
 const mixed = compare(records);
 assert.equal(mixed.events[0].status, 'simulation_eligible');
 assert.equal(mixed.events[40].status, 'reject');

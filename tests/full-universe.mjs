@@ -37,7 +37,7 @@ const bucket = {
 const env = { BUCKET: bucket, API_FOOTBALL_KEY: 'mock-key' };
 const quote = (id) => ({
   fixture: { id },
-  update: new Date().toISOString(),
+  update: new Date(now - (id === 1 ? 1439 : id === 2 ? 1441 : 0) * 60000).toISOString(),
   bookmakers: [
     {
       name: 'Book',
@@ -118,6 +118,14 @@ let uncovered = 0;
 for (const id of prepared.ids) {
   const d = await (await call('scan', { jobId: prepared.jobId, matchId: id })).json();
   assert(d.report);
+  if (id === 1) assert.equal(d.report.events[0].status, 'simulation_eligible');
+  if (id === 2) {
+    assert.equal(d.report.events.length, 0);
+    assert.equal(
+      d.report.firstRejection,
+      'Aucun marché modélisé avec une cote datant d’au plus 24 heures.',
+    );
+  }
   if (id === 15) {
     assert.match(d.report.firstRejection, /toutes les pages/);
     uncovered++;
