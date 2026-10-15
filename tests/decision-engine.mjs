@@ -65,7 +65,7 @@ assert.deepEqual(
   'Future outcomes must not leak into forecast',
 );
 // BIS-217 : l'ancien refus à 1 h devient une admission ; tester la nouvelle frontière.
-for (const minutes of [60, 179, 180]) {
+for (const minutes of [60, 180, 1439, 1440]) {
   changed.odds[0].update = new Date(now - minutes * 60000).toISOString();
   const result = mod.assessMatch(changed, now);
   assert.equal(result.events[0].status, 'simulation_eligible');
@@ -74,7 +74,7 @@ for (const minutes of [60, 179, 180]) {
   assert.equal(result.events[0].realMoneyEligible, false);
 }
 for (const updated of [
-  new Date(now - 181 * 60000).toISOString(),
+  new Date(now - 1441 * 60000).toISOString(),
   undefined,
   'invalid',
   new Date(now + 300001).toISOString(),
@@ -82,7 +82,7 @@ for (const updated of [
   changed.odds[0].update = updated;
   const result = mod.assessMatch(changed, now);
   assert.equal(result.events[0].status, 'reject');
-  assert(result.events[0].reasons.includes('Cote absente, future ou âgée de plus de 3 heures.'));
+  assert(result.events[0].reasons.includes('Cote absente, future ou âgée de plus de 24 heures.'));
   assert.equal(mod.selectCoupon([result], now).length, 0);
 }
 changed.odds[0].update = new Date(now).toISOString();
@@ -190,7 +190,7 @@ assert.equal(review.selections.length, 0, 'LLM cannot add selections');
 assert.equal(llmRequest.store, false);
 // BIS-217 : contrat HTTP scan/review aux deux côtés de la nouvelle frontière.
 // La cote client falsifiée reste ignorée, y compris pour une cote ancienne admissible.
-for (const minutes of [179, 181]) {
+for (const minutes of [1439, 1441]) {
   data.odds[0].update = new Date(now - minutes * 60000).toISOString();
   // Isolat et stockage neufs : éviter de relire le cache du relevé précédent.
   const agedWorker = (
@@ -224,13 +224,13 @@ for (const minutes of [179, 181]) {
       ],
     })
   ).json();
-  assert.equal(agedReview.verdict, minutes === 179 ? 'simulation_eligible' : 'reject');
+  assert.equal(agedReview.verdict, minutes === 1439 ? 'simulation_eligible' : 'reject');
   assert.equal(agedReview.reviews[0].updated, data.odds[0].update);
   assert.equal(agedReview.reviews[0].odd, 1.8);
   assert.equal(agedReview.realMoneyEligible, false);
-  if (minutes === 181)
+  if (minutes === 1441)
     assert(
-      agedReview.reviews[0].reasons.includes('Cote absente, future ou âgée de plus de 3 heures.'),
+      agedReview.reviews[0].reasons.includes('Cote absente, future ou âgée de plus de 24 heures.'),
     );
 }
 data.odds[0].update = new Date(now).toISOString();
