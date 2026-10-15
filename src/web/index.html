@@ -87,24 +87,37 @@
               </li>
             </ul>
           </div>
-          <section class="ticket" aria-labelledby="ticketTitle">
-            <div class="tickethead">
-              <h2 id="ticketTitle" class="eyebrow">Ticket du jour</h2>
-              <span class="chip">Simulation · modèle non validé</span>
-            </div>
-            <div id="assistantResult" class="ticketbody hidden" role="status"></div>
-            <div class="ticketempty">
-              <p class="tickettitle">Le ticket du jour apparaît ici après l’analyse.</p>
-              <p>
-                Tous les matchs du programme filtré sont examinés. Aucun ticket n’est proposé si
-                aucun événement ne passe les filtres : ne pas jouer reste une issue normale.
-              </p>
-            </div>
-            <div class="ticketactions">
-              <button id="propose" class="btn primary">Analyser les matchs filtrés</button>
-              <p class="note" id="assistantState">Vérification de la connexion LLM…</p>
-            </div>
-          </section>
+          <div class="heroside">
+            <section class="ticket marketcoupons" aria-labelledby="couponsTitle">
+              <div class="tickethead">
+                <h2 id="couponsTitle" class="eyebrow">Coupons du jour</h2>
+                <span class="chip">Selon le marché · simulation</span>
+              </div>
+              <div id="marketCoupons" aria-live="polite">
+                <p class="mcmsg">
+                  Les coupons du jour apparaissent ici après l’analyse des matchs filtrés.
+                </p>
+              </div>
+            </section>
+            <section class="ticket" aria-labelledby="ticketTitle">
+              <div class="tickethead">
+                <h2 id="ticketTitle" class="eyebrow">Ticket du jour</h2>
+                <span class="chip">Simulation · modèle non validé</span>
+              </div>
+              <div id="assistantResult" class="ticketbody hidden" role="status"></div>
+              <div class="ticketempty">
+                <p class="tickettitle">Le ticket du jour apparaît ici après l’analyse.</p>
+                <p>
+                  Tous les matchs du programme filtré sont examinés. Aucun ticket n’est proposé si
+                  aucun événement ne passe les filtres : ne pas jouer reste une issue normale.
+                </p>
+              </div>
+              <div class="ticketactions">
+                <button id="propose" class="btn primary">Analyser les matchs filtrés</button>
+                <p class="note" id="assistantState">Vérification de la connexion LLM…</p>
+              </div>
+            </section>
+          </div>
         </div>
         <section class="facts" aria-label="Le programme en chiffres">
           <div class="fact"><strong id="count">—</strong><span>matchs au programme</span></div>
