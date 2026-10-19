@@ -1136,6 +1136,10 @@ function couponAge(minutes) {
 function couponFairOdd(x) {
   return isPrice(x.fairOdds) ? x.fairOdds : 1 / x.marketProbability;
 }
+function couponMinimumOdd(x) {
+  const fairOdd = couponFairOdd(x);
+  return Math.ceil((fairOdd - Number.EPSILON) * 100) / 100;
+}
 function couponValue(x) {
   // `null` signifie que le serveur n'a pas pu établir une comparaison récente.
   // Ne pas remplacer cette absence par un calcul à partir de la probabilité.
@@ -1151,7 +1155,8 @@ function couponValueReason(x) {
       : '';
 }
 function couponSelectionHTML(x) {
-  const fairOdd = frOdd(couponFairOdd(x));
+  const minimumOdd = couponMinimumOdd(x);
+  const fairOdd = frOdd(minimumOdd);
   const valuePercent = couponValue(x);
   const agreed = x.modelCheck === 'ok';
   return (
@@ -1183,7 +1188,7 @@ function couponSelectionHTML(x) {
     '</span></div><span class="oddsage">' +
     esc(couponAge(x.oddsAgeMinutes)) +
     ' · Joue seulement si la cote actuelle est ≥ ' +
-    (Math.ceil(couponFairOdd(x) * 100) / 100).toFixed(2) +
+    minimumOdd.toFixed(2).replace('.', ',') +
     '.' +
     '</span></li>'
   );
