@@ -11,6 +11,7 @@ for (const saved of [null, 'dark', 'light', 'invalid', 'blocked']) {
   let click, change, stored;
   const button = {
     setAttribute: (_, value) => (button.pressed = value),
+    textContent: '',
     addEventListener: (_, fn) => (click = fn),
   };
   const system = { matches: true, addEventListener: (_, fn) => (change = fn) };
@@ -31,6 +32,7 @@ for (const saved of [null, 'dark', 'light', 'invalid', 'blocked']) {
     },
   });
   assert.equal(document.documentElement.dataset.theme, saved === 'light' ? 'light' : 'dark');
+  assert.equal(button.textContent, saved === 'light' ? 'Mode sombre' : 'Mode clair');
   system.matches = false;
   change();
   const expected = saved === 'dark' ? 'dark' : 'light';
@@ -43,9 +45,14 @@ for (const saved of [null, 'dark', 'light', 'invalid', 'blocked']) {
   const chosen = expected === 'dark' ? 'light' : 'dark';
   assert.equal(document.documentElement.dataset.theme, chosen);
   assert.equal(button.pressed, String(chosen === 'dark'));
+  assert.equal(button.textContent, chosen === 'dark' ? 'Mode clair' : 'Mode sombre');
   if (saved !== 'blocked') assert.equal(stored, chosen);
   system.matches = true;
   change();
   assert.equal(document.documentElement.dataset.theme, chosen, 'le choix explicite reste stable');
 }
+const css = await readFile('src/web/styles.css', 'utf8');
+assert.match(css, /@media\s*\(prefers-color-scheme:\s*dark\)/);
+assert.match(css, /:root:not\(\[data-theme\]\)/);
+assert(!/<script\b[^>]*>[^<]+/i.test(await readFile('src/web/index.html', 'utf8')));
 console.log('Thèmes : système, choix persistant et stockage indisponible vérifiés.');
