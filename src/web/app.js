@@ -18,7 +18,6 @@ function initTheme() {
     const dark = choice ? choice === 'dark' : system.matches;
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     button.setAttribute('aria-pressed', String(dark));
-    button.textContent = dark ? 'Mode clair' : 'Mode sombre';
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.content = dark ? '#101916' : '#f5f4ef';
   };

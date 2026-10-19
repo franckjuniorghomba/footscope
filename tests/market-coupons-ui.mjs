@@ -83,8 +83,13 @@ assert(html.includes('Sous la cote juste'), 'la cote bet365 brute est légèreme
 assert(html.includes('Non vérifié'));
 
 html = render({ marketCoupons: [makeCoupon(1)] });
+assert(html.includes('Cote juste du marché</dt><dd>1,22</dd>'));
+assert(html.includes('cote actuelle est ≥ 1,22.</span>'));
 assert(html.includes('1,22'), 'cote juste arrondie vers le haut et affichée avec deux décimales');
-assert(html.includes('cote actuelle est ≥ 1,22'), 'seuil affiché avec une virgule française');
+assert(
+  html.includes('cote actuelle est ≥ 1,22.</span>'),
+  'seuil affiché avec une virgule française',
+);
 assert(html.includes('Club 1 — Visiteur 1'));
 
 // Les deux valeurs sont identiques et arrondies vers le haut ; fairOdds serveur prime sur 1/p.
@@ -101,9 +106,9 @@ edge.selections = [
 edge.confidence = 0.78;
 edge.combinedOdds = 1.281;
 html = render({ marketCoupons: [edge] });
-assert(html.includes('Cote juste du marché</dt><dd>1,29'));
+assert(html.includes('Cote juste du marché</dt><dd>1,29</dd>'));
 assert(
-  html.includes('cote actuelle est ≥ 1,29'),
+  html.includes('cote actuelle est ≥ 1,29.</span>'),
   'juste et seuil utilisent le même arrondi supérieur',
 );
 assert(html.includes('À la cote juste'), 'égalité serveur dans la tolérance affichée correctement');
@@ -111,16 +116,16 @@ assert(!html.includes('−0,0 %'));
 
 edge.selections[0].fairOdds = 1.3;
 html = render({ marketCoupons: [edge] });
-assert(html.includes('Cote juste du marché</dt><dd>1,30'));
-assert(html.includes('cote actuelle est ≥ 1,30'));
+assert(html.includes('Cote juste du marché</dt><dd>1,30</dd>'));
+assert(html.includes('cote actuelle est ≥ 1,30.</span>'));
 
 edge.selections[0].marketProbability = 0.819;
 edge.selections[0].fairOdds = 1 / 0.819;
 edge.confidence = 0.819;
 html = render({ marketCoupons: [edge] });
-assert(html.includes('Cote juste du marché</dt><dd>1,23'));
+assert(html.includes('Cote juste du marché</dt><dd>1,23</dd>'));
 assert(
-  html.includes('cote actuelle est ≥ 1,23'),
+  html.includes('cote actuelle est ≥ 1,23.</span>'),
   'p = 0,819 affiche la même cote juste et le même seuil',
 );
 

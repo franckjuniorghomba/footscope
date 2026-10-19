@@ -1767,6 +1767,24 @@ header.site nav {
   padding: 8px 12px;
   min-height: 48px;
 }
+#themeToggle::before {
+  content: '';
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  vertical-align: -1px;
+}
+#themeToggle[aria-pressed='true'] {
+  background: var(--pitch);
+  border-color: var(--pitch);
+  color: var(--on-pitch);
+}
+#themeToggle[aria-pressed='true']::before {
+  background: currentColor;
+}
 header.site .pill {
   border: 0;
   padding: 0;
