@@ -2044,3 +2044,101 @@ details.more > :not(summary) {
   background: var(--ink);
   color: var(--bg-900);
 }
+
+/* BIS-309 : sur mobile, le premier coupon (match, événement, cote juste) tient dans le premier
+   écran. La place vient de l'en-tête, de l'introduction et des espacements ; l'avertissement,
+   les mentions de simulation et la note de probabilité gardent taille, texte et contraste. */
+@media (max-width: 720px) {
+  header.site {
+    gap: var(--space-1) var(--space-3);
+    padding-top: var(--space-2);
+    padding-bottom: var(--space-2);
+  }
+  header.site nav button {
+    min-height: 40px;
+  }
+  #themeToggle {
+    min-height: 44px;
+    padding-block: var(--space-1);
+  }
+  .dateband {
+    margin-top: var(--space-2);
+  }
+  .dates {
+    margin-bottom: var(--space-1);
+  }
+  .dates button {
+    min-height: 48px;
+    padding-block: var(--space-1);
+  }
+  .dateband .note {
+    margin-bottom: 0;
+  }
+  .hero {
+    padding-block: var(--space-3) var(--space-4);
+    gap: var(--space-3);
+  }
+  .hero h1 {
+    font-size: 26px;
+    line-height: 1.15;
+    max-width: none;
+  }
+  .hero .lead {
+    margin-top: var(--space-1);
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  .heroside {
+    margin-top: var(--space-1);
+    gap: var(--space-4);
+  }
+  .tickethead {
+    gap: var(--space-1) var(--space-3);
+  }
+  .tickethead h2.eyebrow {
+    font-size: 20px;
+  }
+  .mcoupon {
+    padding: var(--space-2) var(--space-4) var(--space-3);
+  }
+  .mchead {
+    gap: var(--space-1);
+    padding-bottom: var(--space-1);
+  }
+  .mctotals {
+    gap: var(--space-4);
+  }
+  .mctotals dd,
+  .mctotals dd.prob {
+    font-size: 24px;
+  }
+  .mcpick {
+    padding-block: var(--space-3);
+    gap: var(--space-2);
+  }
+  .mcpick:first-child {
+    padding-top: var(--space-1);
+  }
+  .mcmatch b {
+    line-height: 1.25;
+  }
+  .mcfacts {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-3);
+  }
+  .mcfacts > div {
+    display: flex;
+    flex-direction: column;
+  }
+  .mcfacts dd {
+    margin-top: auto;
+    padding-top: var(--space-1);
+  }
+  .mctags {
+    gap: var(--space-1) var(--space-2);
+  }
+  .mctags .tag {
+    padding-inline: var(--space-1);
+  }
+}
