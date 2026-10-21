@@ -1,5 +1,20 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+// Horloge fixe : 2026-10-19 12:00 à Ottawa (16:00 UTC). Le test ne lit jamais l'heure réelle.
+// Les 21 matchs commencent 3 h plus tard (15:00 à Ottawa, un par minute) : tous tombent le même jour
+// d'Ottawa, donc `prepare` doit en analyser 21. Avec l'heure réelle, les matchs chevauchaient minuit
+// à Ottawa vers 20:40–21:00 (00:40–01:00 UTC) et ceux d'après minuit sortaient du jour demandé.
+const FIXED_NOW = Date.parse('2026-10-19T16:00:00Z');
+const RealDate = Date;
+globalThis.Date = class extends RealDate {
+  constructor(...args) {
+    if (args.length) super(...args);
+    else super(FIXED_NOW);
+  }
+  static now() {
+    return FIXED_NOW;
+  }
+};
 const source = fs
   .readFileSync('dist/server/index.js', 'utf8')
   .replace(/(?:var|const) API_SPACING_MS\s*=\s*6500\s*;/, 'var API_SPACING_MS = 0;');
@@ -7,9 +22,10 @@ const module = await import(
   'data:text/javascript;base64,' + Buffer.from(source).toString('base64') + '#all'
 );
 const w = module.default;
-const now = Date.now(),
+const now = FIXED_NOW,
   kick = now + 3 * 3600000;
 const date = module.ottawaDay(new Date(kick).toISOString());
+assert.equal(date, '2026-10-19');
 const rows = Array.from({ length: 21 }, (_, i) => ({
   fixture: {
     id: i + 1,
